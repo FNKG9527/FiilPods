@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="[图片链接]" alt="fiilpod Logo" width="120" />
+<img src="docs/assets/logo.svg" alt="fiilpod Logo" width="120" />
 
 # fiilpod
 
@@ -11,7 +11,7 @@
 <div align="center">
 
 ![Release](https://img.shields.io/badge/Release-2.1.0-4B8BF5?style=flat-square)
-![Downloads](https://img.shields.io/github/downloads/[用户名]/[仓库名]/total?style=flat-square&color=34C759)
+![Downloads](https://img.shields.io/github/downloads/FNKG9527/FiilPods/total?style=flat-square&color=34C759)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Framework](https://img.shields.io/badge/Framework-LSPosed-FF6B6B?style=flat-square)
 ![ROM](https://img.shields.io/badge/ROM-澎湃OS%203%20%7C%204-FF6900?style=flat-square)
@@ -105,7 +105,9 @@
 
 **1. 安装 APK**
 
-下载 [Release 页面]([Release链接]) 的 `fiilpod-v2.1.0-release.apk`，直接安装（日常使用装 release 版即可，`debug` 版体积更大但带完整日志）。
+下载 [Release 页面](https://github.com/FNKG9527/FiilPods/releases/latest) 的 `FiilPods-v2.1.0-release.apk`，直接安装（日常使用装 release 版即可，`debug` 版体积更大但带完整日志）。
+
+> 📦 三个版本（1.0.0 / 2.0.0 / 2.1.0）包名与签名一致，可直接覆盖安装，无需卸载。历史版本见 [Releases](https://github.com/FNKG9527/FiilPods/releases)。
 
 **2. 在 LSPosed 中启用**
 
@@ -129,6 +131,8 @@ com.milink.service
 - 下拉控制中心，可见融合设备中心的耳机卡片
 - 进入「设置 → 蓝牙 → 你的耳机」，可见电量与降噪控制卡片
 - 打开 fiilpod App，可见完整的耳机详情页
+
+> 🔧 **遇到问题？** 设置页 → 日志级别设为「详细」→ 耳机页右上角图标进入**协议调试页**，可看 TX/RX 原始字节、复制、导出。提 Issue 时附上这段日志（已脱敏）能大幅加快定位。
 
 ---
 
@@ -198,9 +202,23 @@ Mate 机型建立 RFCOMM 链路后，**必须先发一条解锁帧**，否则耳
 - **[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)** —— 本项目的协议与实现参考来源。FIIL 私有协议的帧格式、命令号与握手流程分析参考了该项目的工作。
 - **[libxposed](https://github.com/libxposed/api)** —— 现代化的 Xposed API 实现。
 - **[Miuix](https://github.com/miuix-kotlin-multiplatform/miuix)** —— 提供 HyperOS 风格的 Compose 组件。
-- **[[其他致谢项目名称]]([其他项目链接])** —— [致谢说明]
 
 同时也感谢 [FIIL](https://www.fiil.com/) 做出了这些耳机，以及所有提供测试反馈的用户。
+
+---
+
+## 📚 更多文档
+
+| 文档 | 内容 |
+|---|---|
+| 💡 [实现原理详解](docs/IMPLEMENTATION.md) | 注入架构 / 双传输层 / 协议族分流 / 设置页注入 / 系统级联动 |
+| 📡 [协议字节表](docs/PROTOCOL_FIIL.md) | UUID 全表、GAIA 190 条命令、Mate cid/cmd 对照、未确认项清单 |
+| 🧪 [真机回归记录](docs/DEVICE_TEST.md) | 19 项用例的实测结果与未覆盖项 |
+| 🔍 [诊断档案](docs/IMPLEMENTATION.md#七相关文档) | 九处连接根因、跨进程闪退、模式切换失效、v2.1 三处修复 |
+| 🏗 [架构分析](docs/ARCH_OPPOPODS.md) | OppoPods 架构拆解（UI 移植依据） |
+| ✅ [验收报告](docs/ACCEPTANCE_REPORT.md) | 6 角色联合结项验收（72/100，「可内测」） |
+| 📝 [更新日志](CHANGELOG.md) | 1.0.0 → 2.1.0 完整变更 |
+| 🤝 [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md) | 提 PR 与漏洞上报 |
 
 ---
 
