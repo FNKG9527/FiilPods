@@ -1,0 +1,44 @@
+# Gradle
+.gradle/
+.kotlin/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android
+local.properties
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+# APK 不进 git（走 GitHub Releases）
+dist/*.apk
+!dist/v1-src/**
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# 日志与临时产物
+*.log
+hs_err_pid*.log
+replay_pid*.log
+_tmp_*
+*.hprof
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 本地工具与逆向产物（体积大/含第三方代码，不入库）
+refs/
+tools/probe/FiilProbe/bin/
+tools/probe/FiilProbe/obj/
+_bt15_out/
+_bt17_out/
+_backup_old_ui/

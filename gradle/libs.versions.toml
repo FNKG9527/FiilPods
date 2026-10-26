@@ -1,0 +1,42 @@
+[versions]
+agp = "9.1.1"
+focusApi = "1.4"
+kotlin = "2.4.20"
+coreKtx = "1.19.1"
+androidx-activity-compose = "1.13.0"
+composeBom = "2026.09.00"
+kotlinxSerializationJson = "1.11.0"
+libxposedApi = "102.0.0"
+libxposedService = "102.0.0"
+miuix = "0.9.4"
+miuixNav = "0.9.4"
+junit = "4.13.2"
+
+[plugins]
+agp-app = { id = "com.android.application", version.ref = "agp" }
+agp-lib = { id = "com.android.library", version.ref = "agp" }
+lsplugin-resopt = { id = "org.lsposed.lsplugin.resopt", version = "1.6" }
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+
+[libraries]
+coreKtx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+libxposedApi = { group = "io.github.libxposed", name = "api", version.ref = "libxposedApi" }
+libxposedService = { group = "io.github.libxposed", name = "service", version.ref = "libxposedService" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+compose-material-icons = { module = "androidx.compose.material:material-icons-extended" }
+miuix = { group = "top.yukonga.miuix.kmp", name = "miuix-ui-android", version.ref = "miuix" }
+miuix-nav = { module = "top.yukonga.miuix.kmp:miuix-nav", version.ref = "miuixNav" }
+miuix-preference = { group = "top.yukonga.miuix.kmp", name = "miuix-preference-android", version.ref = "miuix" }
+miuix-icons = { group = "top.yukonga.miuix.kmp", name = "miuix-icons-android", version.ref = "miuix" }
+miuix-blur = { group = "top.yukonga.miuix.kmp", name = "miuix-blur-android", version.ref = "miuix" }
+focus-api = { group = "com.xzakota.hyper.notification", name = "focus-api", version.ref = "focusApi" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题 · Security vulnerability
+    url: https://github.com/FNKG9527/FiilPods/security/advisories/new
+    about: 请勿用公开 Issue 报告安全漏洞，走这里。
+  - name: 使用问题 · Discussions
+    url: https://github.com/FNKG9527/FiilPods/discussions
+    about: 安装、配置、机型适配等使用类问题请到 Discussions。
+  - name: 协议文档 · PROTOCOL_FIIL.md
+    url: https://github.com/FNKG9527/FiilPods/blob/main/docs/PROTOCOL_FIIL.md
+    about: 提问前先查协议文档，大部分指令问题这里已有答案。

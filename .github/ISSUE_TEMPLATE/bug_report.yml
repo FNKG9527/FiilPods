@@ -1,0 +1,90 @@
+name: Bug Report / 缺陷报告
+description: 报告一个可复现的缺陷
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请确认：
+        - 已搜索过[已有 Issue](https://github.com/FNKG9527/FiilPods/issues)
+        - 已在 [CHANGELOG](CHANGELOG.md) 里确认这不是已修复的问题
+        - 日志已脱敏（MAC 地址等）
+
+  - type: input
+    id: module-version
+    attributes:
+      label: 模块版本
+      description: 设置页「关于」里显示的版本，或 `adb shell dumpsys package moe.chenxy.fiilpods | grep versionName`
+      placeholder: 2.1.0 (versionCode 3)
+    validations:
+      required: true
+
+  - type: input
+    id: earphone
+    attributes:
+      label: 耳机型号
+      placeholder: FIIL Key Max
+    validations:
+      required: true
+
+  - type: input
+    id: phone
+    attributes:
+      label: 手机型号 / Android 版本
+      placeholder: Redmi K90 Pro Max / Android 17 (API 37) / HyperOS V816
+    validations:
+      required: true
+
+  - type: input
+    id: lsposed
+    attributes:
+      label: LSPosed 版本
+      placeholder: LSPosed 2.2.1 (7912), API 102
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 越具体越好，1. 2. 3. 这样列
+      placeholder: |
+        1. 打开设置页，把「超级岛来源」设为「模块」
+        2. 回到模块页
+        3. 观察到……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 模块日志（已脱敏）
+      description: 设置 → 日志级别设为「详细」，用 debug 版复现后从「导出日志」复制
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认项
+      options:
+        - label: 我已确认日志中不含完整 MAC 地址或其他敏感信息
+          required: true
+        - label: 我使用的是最新版本
+          required: true

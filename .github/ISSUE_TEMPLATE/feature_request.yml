@@ -1,0 +1,68 @@
+name: Feature Request / 功能建议
+description: 建议新增功能或改进现有功能
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提建议前请先看 [README](README.md) 的「它做了什么」与 [CHANGELOG](CHANGELOG.md)，
+        确认这个功能还没有实现。
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 功能归属
+      options:
+        - 协议 / 指令（新增耳机控制能力）
+        - UI / 界面
+        - 系统集成（设置页 / 超级岛 / 融合设备中心）
+        - 机型支持（新耳机型号）
+        - 构建 / 工程
+        - 文档
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: earphone
+    attributes:
+      label: 相关耳机型号（若适用）
+      placeholder: FIIL Key Max / FIIL CC Pro2 / 通用
+    validations:
+      required: false
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 描述使用场景，而不是直接给实现方案
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的做法（可选）
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 协议证据（若涉及新增指令）
+      description: |
+        本项目**禁止臆造指令**。任何新增指令必须附证据：
+        - jadx 反编译路径 + 行号，或
+        - PC 端抓包的原始十六进制（TX/RX 成对）
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认项
+      options:
+        - label: 我理解未经实机验证的指令只会进入「原始 Hex」通道，不会做成 UI 按钮
+          required: true
