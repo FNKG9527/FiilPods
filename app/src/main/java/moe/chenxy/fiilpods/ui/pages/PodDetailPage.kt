@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import moe.chenxy.fiilpods.R
 import moe.chenxy.fiilpods.config.ConfigManager
 import moe.chenxy.fiilpods.pods.NoiseControlMode
+import moe.chenxy.fiilpods.pods.PodImages
 import moe.chenxy.fiilpods.pods.WearStatus
 import moe.chenxy.fiilpods.ui.components.AncSwitch
 import moe.chenxy.fiilpods.ui.components.PodStatus
@@ -67,6 +68,9 @@ fun PodDetailPage(
     /** 语音提示音量线值 0=高 1=中 2=低 3=静音，-1 表示还没读到。 */
     toneVolume: Int = -1,
     lowLatencyMode: Int = -1,
+    /** LDAC 开关状态：-1=未知/不支持（不渲染），0=关，1=开。 */
+    ldacState: Int = -1,
+    onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
     spatialAudioSupported: Boolean = false,
@@ -76,6 +80,13 @@ fun PodDetailPage(
     dualDeviceSupported: Boolean = false,
     onOpenEqualizer: () -> Unit = {},
     boxImagePath: String? = null,
+    /**
+     * 当前耳机的 earType（`-1` = 未知）。
+     *
+     * 用户没自定义过产品图时（[boxImagePath] 为空），详情页按这个值
+     * 回落到 FIIL+ 逆向出来的对应型号产品图，而不是一刀切显示通用的 `img_box`。
+     */
+    earType: Int = -1,
 ) {
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -94,7 +105,7 @@ fun PodDetailPage(
                 verticalArrangement = Arrangement.Center
             ) {
                 Image(
-                    painter = rememberPodImagePainter(boxImagePath),
+                    painter = rememberPodImagePainter(boxImagePath, earType),
                     contentDescription = "Earphones",
                     modifier = Modifier
                         .fillMaxWidth(0.82f)
@@ -134,6 +145,8 @@ fun PodDetailPage(
                     onDualDeviceConnectionChange = onDualDeviceConnectionChange,
                     toneVolume = toneVolume,
                     lowLatencyMode = lowLatencyMode,
+                    ldacState = ldacState,
+                    onLdacChange = onLdacChange,
                     onToneVolumeChange = onToneVolumeChange,
                     onLowLatencyModeChange = onLowLatencyModeChange,
                     spatialAudioSupported = spatialAudioSupported,
@@ -156,7 +169,7 @@ fun PodDetailPage(
     ) {
         item {
             Image(
-                painter = rememberPodImagePainter(boxImagePath),
+                painter = rememberPodImagePainter(boxImagePath, earType),
                 contentDescription = "Earphones",
                 modifier = Modifier
                     .fillMaxWidth(0.7f)
@@ -182,6 +195,8 @@ fun PodDetailPage(
             onDualDeviceConnectionChange = onDualDeviceConnectionChange,
             toneVolume = toneVolume,
             lowLatencyMode = lowLatencyMode,
+            ldacState = ldacState,
+            onLdacChange = onLdacChange,
             onToneVolumeChange = onToneVolumeChange,
             onLowLatencyModeChange = onLowLatencyModeChange,
             spatialAudioSupported = spatialAudioSupported,
@@ -196,13 +211,19 @@ fun PodDetailPage(
 }
 
 @Composable
-private fun rememberPodImagePainter(path: String?) = remember(path) {
+private fun rememberPodImagePainter(path: String?, earType: Int) = remember(path, earType) {
+    // 优先级：用户自定义的产品图（path 指向 PodImagePrefs 存的文件）> 型号产品图
     path?.let {
         runCatching { BitmapFactory.decodeFile(it) }
             .getOrNull()
             ?.let { bitmap -> BitmapPainter(bitmap.asImageBitmap()) }
     }
-} ?: painterResource(R.drawable.img_box)
+} ?: painterResource(
+    // earType 未知（-1）时 PodImages 会落到 fiil_unknow；
+    // 但这里更希望保持旧的万能盒子图，因为 fiil_unknow 是「官方也不认识这型号」的兜底，
+    // 用在本模块里会让人误以为识别失败。所以只在确实识别出型号时才换图。
+    if (earType > 0) PodImages.drawableOf(earType) else R.drawable.img_box,
+)
 
 private fun LazyListScope.podControlItems(
     batteryParams: BatteryParams,
@@ -221,6 +242,9 @@ private fun LazyListScope.podControlItems(
     onDualDeviceConnectionChange: (Boolean) -> Unit,
     toneVolume: Int = -1,
     lowLatencyMode: Int = -1,
+    /** LDAC 开关状态：-1=未知/不支持（不渲染），0=关，1=开。 */
+    ldacState: Int = -1,
+    onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
     spatialAudioSupported: Boolean,
@@ -345,6 +369,23 @@ private fun LazyListScope.podControlItems(
                     onSelectedIndexChange = { onLowLatencyModeChange(it) }
                 )
             }
+            if (ldacState >= 0) {
+                // LDAC 是真开关：底层走 A2dpService.setCodecConfigPreference(cid 不在耳机侧，
+                // 而是系统蓝牙协议栈)，状态由 CODEC_CONFIG_CHANGED 回读。
+                // ldacState<0 表示本 ROM 无法判定，直接不渲染 —— 宁可没有，也不给假开关。
+                //
+                // ⚠️ 标题/摘要用「字面量拼接」而不是 stringResource(R.string.xxx)：
+                // R8 + shrinkResources 会把只被这一处引用的资源当成无用资源删掉（实测
+                // release APK 里 ldac_codec / ldac_summary / ldac_unsupported 三个字符串
+                // 连同资源 ID 一起消失，而 dex 里字段引用还在，运行时就是 Resources$NotFound），
+                // 所以这里改成从源码常量取文本，彻底摆脱对资源 ID 的依赖。
+                SwitchPreference(
+                    title = LDAC_TITLE,
+                    summary = if (ldacState > 0) LDAC_ENABLED else LDAC_SUMMARY,
+                    checked = ldacState > 0,
+                    onCheckedChange = onLdacChange
+                )
+            }
             if (dualDeviceSupported) {
                 SwitchPreference(
                     title = stringResource(R.string.dual_device_connection),
@@ -359,3 +400,16 @@ private fun LazyListScope.podControlItems(
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(bottomContentPadding))
     }
 }
+
+
+/**
+ * LDAC 开关的界面文案（字面量，不走 `R.string`）。
+ *
+ * 原因见 `podControlItems` 里那段注释：release 构建开启了 `isShrinkResources = true`，
+ * 只被单个位置引用的字符串资源会被当作无用资源剥掉，而反射／间接引用仍会去查资源 ID，
+ * 结果就是 `Resources$NotFoundException`。文案量很小（4 条），直接内联最稳。
+ */
+internal const val LDAC_TITLE: String = "LDAC 编解码器"
+internal const val LDAC_SUMMARY: String = "启用高解析蓝牙音频（需耳机与手机同时支持）"
+internal const val LDAC_UNSUPPORTED: String = "当前耳机不支持 LDAC"
+internal const val LDAC_ENABLED: String = "已启用"

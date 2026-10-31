@@ -65,6 +65,10 @@ class PopupActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 弹层是「通知点击」的目标，也是最容易被用户看到的入口。
+        // 通知权限若还没给，在这里补一次申请（同一个 App 只会弹一次系统框）。
+        runCatching { moe.chenxy.fiilpods.utils.NotifPermission.ensure(this) }
+
         val prefs = getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE)
         val appConfig = ConfigManager.refreshFromPrefs(prefs)
         val bluetoothDevice = intent.parcelableDevice("android.bluetooth.device.extra.DEVICE")

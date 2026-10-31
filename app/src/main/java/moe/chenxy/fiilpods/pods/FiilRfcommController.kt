@@ -80,6 +80,56 @@ object FiilRfcommController {
         "user-request", "stop", "a2dp-disconnected", "reconnect", "multipoint-switch",
     )
 
+    /**
+     * 连续失败多少次后停止自动重连。
+     *
+     * 「失败」的定义见 [noteDisconnectHealth]：**连上后一个字节都没收到就断**，或
+     * **连上不到 [STABLE_CONNECTION_MS] 就被断**。这两种都说明链路根本用不起来，
+     * 再连只是重复同一件事。
+     *
+     * 没有这个闸门时的实测表现（v2.1.0 基线，两个回路都是无界的）：
+     *  · 回路 A —— [scheduleSilenceProbe] 3.5s 判「通道不对」→ [disconnect] →
+     *    自动补连 5s → 连上 → 再次静默 …，周期 8.5s（SPP 与 GATT 都静默时 17s）；
+     *  · 回路 B —— 链路连上即被对端关闭 → [readLoop] 退出 → [disconnect] →
+     *    5s 后重连 → 又被关 …，周期 5s，且没有任何换通道之类的自愈动作。
+     * 两条回路每次翻转都会广播 CONNECTED / DISCONNECTED，UI 于是来回跳。
+     */
+    private const val MAX_CONSECUTIVE_FAILURES = 3
+
+    /**
+     * 连续失败到阈值后，多久之内不再自动重连。
+     *
+     * 冷却期内 [connect] 的**自动**调用一律被拒（包括 UI 每 30s 一次的
+     * `ACTION_PODS_UI_INIT` 顺带补连），只有用户手动点「连接」
+     * （`userInitiated = true`）能穿透 —— 用户明确要重试时不该拦他。
+     */
+    private const val RECONNECT_COOLDOWN_MS = 60_000L
+
+    /**
+     * 冷却时长的上限。
+     *
+     * 每轮冷却翻倍（60s → 120s → 240s …），封顶 15 分钟。到这个量级之后，
+     * 链路要么已经自愈（耳机放回仓再取出、换了个房间），要么就是硬件/配对
+     * 层面真的坏了 —— 继续每 5 秒试一次只会耗电并把 UI 刷成幻灯片。
+     */
+    private const val MAX_COOLDOWN_MS = 15 * 60_000L
+
+    /**
+     * 连上后维持多久才算「这次连接是好的」。
+     *
+     * 超过这个时长仍在连着（且期间收到过数据），下次断线就按正常故障处理、
+     * 失败计数清零 —— 不能把「用了半小时后耳机没电」也算成链路故障。
+     */
+    private const val STABLE_CONNECTION_MS = 8_000L
+
+    /**
+     * 补连等待时间的上限。
+     *
+     * 退避按 `5s × 连续失败次数` 增长，最坏会到 30s 一轮；封顶在这里，
+     * 既让回路频率肉眼可见地衰减，又不至于让一次正常的耳机回连等太久。
+     */
+    private const val MAX_RECONNECT_DELAY_MS = 30_000L
+
     private val started = AtomicBoolean(false)
 
     @Volatile
@@ -96,6 +146,67 @@ object FiilRfcommController {
      */
     @Volatile
     private var lastRxAt: Long = 0L
+
+    /**
+     * 本轮连接**是否收到过**耳机的字节。
+     *
+     * 与 [lastRxAt] 的区别：`lastRxAt` 是「最后一次收到的时间戳」，每轮连接开始时
+     * 被 [scheduleSilenceProbe] 清零；本字段是「这一轮到底通过没有」的布尔印记，
+     * 断线时用它判断这次失败该不该计入 [consecutiveFailures]。
+     */
+    @Volatile
+    private var everReceivedData = false
+
+    /** 本轮连接建立的时间点（`System.currentTimeMillis()`），0 表示还没连过。 */
+    @Volatile
+    private var lastConnectAt: Long = 0L
+
+    /**
+     * 连续失败次数，达到 [MAX_CONSECUTIVE_FAILURES] 就进冷却。
+     *
+     * 只在 [noteDisconnectHealth] 里加、在 [clearFailureStreak] 里清。
+     * 不用原子类：写入方都是单线程的断线回包路径，读的一方（[connect] /
+     * [scheduleReconnect]）容忍短暂陈旧 —— 最坏情况是多试一次连接。
+     */
+    @Volatile
+    private var consecutiveFailures: Int = 0
+
+    /** 冷却截止时间点；`0` 或已过期表示不在冷却中（[isCoolingDown] 会顺手清掉）。 */
+    @Volatile
+    private var cooldownUntil: Long = 0L
+
+    /**
+     * 已经历过多少轮冷却 —— 冷却时长按此逐轮翻倍。
+     *
+     * 只有「固定 60s 冷却」是不够的：冷却一过，[consecutiveFailures] 若被清零，
+     * 下一轮又是「失败 3 次 → 等 60s」，回路只是从 5 秒一次变成 60 秒一次，
+     * 依然会一直来回跳。所以这里做两件事：
+     *  · 冷却到期**不清** [consecutiveFailures]，于是冷却后第一次失败立刻再次
+     *    触发冷却（不必再累积 3 次）；
+     *  · 每进一次冷却 [cooldownLevel] +1，时长 60s → 120s → 240s … 封顶
+     *    [MAX_COOLDOWN_MS]，回路频率因此单调衰减直至实际停止。
+     * 恢复只有两条正路：连接稳定超过 [STABLE_CONNECTION_MS]（见
+     * [noteDisconnectHealth]），或用户手动重试（[clearFailureStreak]）。
+     */
+    @Volatile
+    private var cooldownLevel: Int = 0
+
+    /**
+     * 用户刚亲手点过「断开」：在用户再次表达连接意愿之前，拒绝一切**自动**连接。
+     *
+     * 为什么必须有它（这是「连接/断开反复变化」最容易被用户看到的一环）：
+     * 2.1.0 基线的 [disconnect] 在 `user-request` 时确实不会再主动补连，但
+     * `BluetoothProcessHook` 每 30 秒会收一次 `ACTION_PODS_UI_INIT` 心跳，那里有
+     * `if (!isConnected) connect(device)` —— 于是「用户点断开 → 界面显示已断开
+     * → 最多 30 秒后自己又连上 → 用户以为没断掉，再点一次」。用户看到的就是
+     * 在已连接/已断开之间来回跳，且他按了按钮也没用。
+     *
+     * 清除时机（都是「用户重新表达了连接意愿」）：
+     *  · 用户在界面上点「连接」（[connectUserInitiated]）；
+     *  · A2DP 重新连上 —— 耳机出仓、用户在系统设置里手动重连，都是真实意图。
+     */
+    @Volatile
+    private var userRequestedDisconnect = false
 
     /**
      * 下一次连接优先走哪条 RFCOMM 通道；`null` 表示按机型推断（不干预）。
@@ -196,6 +307,25 @@ object FiilRfcommController {
     @Volatile
     var ancMode: Int = -1
         private set
+
+    /**
+     * 刚下发、尚未被耳机回包确认的 ANC 目标值；-1 表示没有待确认的切换。
+     *
+     * 为什么要单独记一份：`setAnc()` 已经把 [ancMode] 乐观写成目标值，但耳机从
+     * 收到命令到真的切换完成有 1~2 秒延迟，这期间它可能先回报一次**旧状态**
+     * （MAF_STATUS / ANC GAIA 回报都可能）。若直接采纳，[ancMode] 就被打回旧值，
+     * 紧接着的 `publishState()` 让融合中心闪回旧模式，等真回包到了再闪回新模式 ——
+     * 正是用户看到的「闪一下原来的模式再闪一下通透」。
+     *
+     * 处理：结算窗口内只接受与目标值一致的回包，不一致的按过期回报丢弃。
+     * 窗口由 [ANC_CONFIRM_WINDOW_MS] 兜底，所以耳机真切换失败时最终仍会显示真实值。
+     */
+    @Volatile
+    private var pendingAncTarget: Int = -1
+
+    /** [pendingAncTarget] 的下发时刻（`elapsedRealtime` 毫秒）。 */
+    @Volatile
+    private var pendingAncAt: Long = 0L
 
     /** 左 / 右 / 盒电量，-1 表示未知。 */
     @Volatile
@@ -394,6 +524,17 @@ object FiilRfcommController {
             Log.w(TAG, "connect ignored: controller not started")
             return
         }
+        // 冷却期内拒绝**自动**重连。用户手动点「连接」走 connectUserInitiated()，
+        // 那里会先 clearFailureStreak()，所以这条闸门不会挡住明确的用户意图。
+        if (isCoolingDown()) {
+            Log.i(TAG, "connect ignored: in cooldown after $consecutiveFailures consecutive failures")
+            return
+        }
+        // 用户刚亲手断开：在他说要连之前不许自己连回来（详见 userRequestedDisconnect）。
+        if (userRequestedDisconnect) {
+            Log.i(TAG, "connect ignored: user requested disconnect")
+            return
+        }
         if (isConnected) return
         if (connectInFlight) {
             Log.i(TAG, "connect skipped: another attempt in flight")
@@ -478,6 +619,10 @@ object FiilRfcommController {
             }
             isMateDialect = FiilModels.isMateDialect(earType)
             isConnected = true
+            // 新一轮连接开始：先把「是否收到过数据」「何时连上」这两个健康印记重置，
+            // 否则上一轮的成功会污染这一轮的判定（见 noteDisconnectHealth）。
+            everReceivedData = false
+            lastConnectAt = System.currentTimeMillis()
             publishState()
             readerThread = Thread({ readLoop(sock) }, "FiilPods-Reader").apply {
                 isDaemon = true
@@ -578,6 +723,9 @@ object FiilRfcommController {
         // 且 handshake() 在型号未知时本来就两套协议各打一发，会由首个回包自行定论。
         isMateDialect = if (earType > 0) FiilModels.isMateDialect(earType) else true
         isConnected = true
+        // 与 SPP 分支一致：新一轮连接，重置健康印记。
+        everReceivedData = false
+        lastConnectAt = System.currentTimeMillis()
         Log.i(TAG, "gatt channel ready, handshaking (earType=$earType mate=$isMateDialect)")
         RfcommLog.i(
             appContext, TAG,
@@ -598,11 +746,18 @@ object FiilRfcommController {
         val addr = deviceAddress
         Log.i(TAG, "gatt channel lost (addr=$addr)")
         RfcommLog.w(appContext, TAG, "gatt channel lost addr=$addr")
+        // 这里必须先把 wasConnected 存下来再清 isConnected：noteDisconnectHealth
+        // 依赖「断开前是否真的处于连接态」来判断这次失败要不要计数。
+        val wasConnected = isConnected
         isConnected = false
         publishState()
         runCatching { silenceProbe?.interrupt() }
         silenceProbe = null
-        if (addr != null && addr.isNotEmpty()) scheduleReconnect(addr, RECONNECT_ATTEMPTS)
+        // 与 disconnect() 走同一套记账：GATT 掉线同样可能是「连上即断」的回路 B。
+        noteDisconnectHealth("gatt-lost", wasConnected, manual = false)
+        if (addr != null && addr.isNotEmpty() && !isCoolingDown()) {
+            scheduleReconnect(addr, RECONNECT_ATTEMPTS)
+        }
     }
 
     fun disconnect(reason: String) {
@@ -616,6 +771,10 @@ object FiilRfcommController {
         // 畅连切换引起的断线：不是故障，走专用退避重连，且不计入普通补连。
         val multipointSwitch = reconnectAfterMultipoint
         if (manual) {
+            // 用户亲手断开：在他说要连之前不许任何自动路径连回来。
+            // 这是「连接/断开反复跳」最直观的一环 —— 基线里 UI 每 30s 的心跳
+            // 会顺手补连，用户点了断开最多半分钟又自己连上。
+            if (reason == "user-request" || reason == "stop") userRequestedDisconnect = true
             // 主动断开要同时取消排队中的补连，否则用户刚点「断开」，
             // 5 秒后那个还在 sleep 的补连线程醒来又把连接拉回去。
             // 不能打断自己：补连线程内部若调用到 disconnect()，interrupt 会让
@@ -634,10 +793,130 @@ object FiilRfcommController {
             scheduleMultipointReconnect(addr.orEmpty())
             return
         }
+        // 记账：这次断线算不算「链路根本用不起来」。必须在 scheduleReconnect 之前，
+        // 因为后者要看 [consecutiveFailures] 决定还试不试。
+        noteDisconnectHealth(reason, wasConnected, manual)
         // 意外断线（socket 自己没了）自动补连；主动断开不重连。
         if (wasConnected && addr != null && !manual) {
             scheduleReconnect(addr, RECONNECT_ATTEMPTS)
         }
+    }
+
+    /**
+     * 断线健康度记账 —— 决定这次断开该不该计入「连续失败」。
+     *
+     * 只有「连上过但根本用不起来」才计数：
+     *  · [everReceivedData] 为 `false`：连上了却一个字节都没收到
+     *    （回路 A 的静默通道）；
+     *  · 维持时长不足 [STABLE_CONNECTION_MS]：连上没几秒就被踢（回路 B 的
+     *    「连上即断」）。
+     * 反过来，维持超过 8 秒且收过数据的连接，断线属于正常故障（走出房间、耳机没电），
+     * 必须把计数清零，否则用户正常用一会儿之后再连会被误判成故障而进冷却。
+     *
+     * @param manual 用户/系统主动断开 —— 这是用户的决定，既有计数不增也不清
+     *   （清了会让「连上就断 → 用户手动断 → 再连」这条路无限循环下去）。
+     */
+    private fun noteDisconnectHealth(reason: String, wasConnected: Boolean, manual: Boolean) {
+        if (manual || !wasConnected) return
+        val heldMs = if (lastConnectAt > 0L) System.currentTimeMillis() - lastConnectAt else 0L
+        val stable = everReceivedData && heldMs >= STABLE_CONNECTION_MS
+        if (stable) {
+            if (consecutiveFailures > 0 || cooldownLevel > 0) {
+                Log.i(TAG, "link was stable (${heldMs}ms) — clearing failure streak")
+            }
+            consecutiveFailures = 0
+            cooldownLevel = 0
+            cooldownUntil = 0L
+            return
+        }
+        consecutiveFailures++
+        Log.w(
+            TAG,
+            "unhealthy disconnect ($reason): held=${heldMs}ms rx=$everReceivedData " +
+                "streak=$consecutiveFailures/$MAX_CONSECUTIVE_FAILURES level=$cooldownLevel",
+        )
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            // 冷却时长逐轮翻倍：60s → 120s → 240s … 封顶 MAX_COOLDOWN_MS。
+            // 这是让回路**真正收敛**的关键 —— 固定 60s 只是把 5s 的抖动拉长成 1 分钟抖动。
+            val window = (RECONNECT_COOLDOWN_MS shl cooldownLevel.coerceAtMost(10))
+                .coerceAtMost(MAX_COOLDOWN_MS)
+            cooldownUntil = System.currentTimeMillis() + window
+            cooldownLevel++
+            Log.w(
+                TAG,
+                "giving up auto-reconnect for ${window}ms " +
+                    "($MAX_CONSECUTIVE_FAILURES consecutive unhealthy connects, " +
+                    "cooldown #$cooldownLevel)",
+            )
+            // 让 UI 显示「连不上」而不是继续在「已连接 / 已断开」之间跳。
+            publishLinkFailed()
+        }
+    }
+
+    /** 是否处于「连续失败后」的冷却期。 */
+    private fun isCoolingDown(): Boolean {
+        val until = cooldownUntil
+        if (until == 0L) return false
+        if (System.currentTimeMillis() >= until) {
+            // ⚠️ 这里**故意不清** consecutiveFailures / cooldownLevel：
+            // 冷却结束只是允许再来一次，不是「问题已解决」。若这一轮仍然废掉，
+            // 计数会立刻再次触顶、进入更长的下一轮冷却（见 noteDisconnectHealth）。
+            // 真正的恢复只发生在连接稳定超时或用户手动重试时。
+            cooldownUntil = 0L
+            return false
+        }
+        return true
+    }
+
+    /**
+     * 用户手动发起的连接：清掉失败计数与冷却期，穿透所有限流。
+     *
+     * UI 的「连接」按钮、设备选择页的点击都走这里 —— 用户已经看到了失败提示，
+     * 他再点一次就是明确要求重试，这时不该再被自动重连的刹车挡住。
+     */
+    fun connectUserInitiated(device: BluetoothDevice) {
+        clearFailureStreak()
+        // 用户重新表达了连接意愿，解除「用户刚断开」的封锁。
+        userRequestedDisconnect = false
+        connect(device)
+    }
+
+    /**
+     * 外部观察到的「用户级」连接事件（A2DP 重新连上）——解除 [userRequestedDisconnect]。
+     *
+     * 用户可能是出仓自动回连、也可能在系统蓝牙设置里手动点了连接。两种都是
+     * 真实的连接意愿，此时若还挂着「用户刚才点过断开」的封锁，UI 就会显示
+     * 「已连接」但模块收不到数据卡片，反而更奇怪。
+     */
+    fun onExternalConnectEvent() {
+        if (userRequestedDisconnect) {
+            Log.i(TAG, "user-requested disconnect cleared by external connect event")
+            userRequestedDisconnect = false
+        }
+    }
+
+    /** 清零失败计数与冷却期，并重置本轮连接的健康印记。 */
+    fun clearFailureStreak() {
+        if (consecutiveFailures > 0 || cooldownUntil != 0L || cooldownLevel > 0) {
+            Log.i(TAG, "failure streak cleared by user action")
+        }
+        consecutiveFailures = 0
+        cooldownUntil = 0L
+        cooldownLevel = 0
+        everReceivedData = false
+        lastConnectAt = 0L
+    }
+
+    /**
+     * 广播「链路反复失败，已停止自动重连」。
+     *
+     * 用一个明确的终态取代 CONNECTED / DISCONNECTED 的来回翻转：UI 侧收到
+     * `state="error"` 会弹「连接失败」对话框并回到设备选择页
+     * （见 MainUI.kt 的 `LaunchedEffect(hookConnectionState)`）。
+     */
+    private fun publishLinkFailed() {
+        val ctx = appContext ?: return
+        runCatching { OppoCompatBridge.publishLinkFailed(ctx) }
     }
 
     /**
@@ -653,12 +932,24 @@ object FiilRfcommController {
         if (address.isEmpty()) return
         val running = multipointReconnectThread
         if (running != null && running.isAlive) return
+        // 畅连切换虽然「不是故障」，但它同样会走 connectBlocking → 失败 → 再试的循环。
+        // 冷却期内不再起线程，否则这条独立路径会把刹车绕过去。
+        if (isCoolingDown()) {
+            Log.i(TAG, "multipoint reconnect skipped: cooling down after repeated failures")
+            reconnectAfterMultipoint = false
+            return
+        }
         multipointReconnectThread = Thread({
             try {
                 for ((index, delay) in MULTIPOINT_SEAL_DELAYS_MS.withIndex()) {
                     Thread.sleep(delay)
                     if (!started.get()) return@Thread
                     if (isConnected) return@Thread
+                    if (isCoolingDown()) {
+                        Log.i(TAG, "multipoint reconnect exits: cooling down after repeated failures")
+                        reconnectAfterMultipoint = false
+                        return@Thread
+                    }
                     Log.i(
                         TAG,
                         "multipoint reconnect ${index + 1}/${MULTIPOINT_SEAL_DELAYS_MS.size} -> $address",
@@ -720,32 +1011,51 @@ object FiilRfcommController {
     }
 
     /**
-     * 后台补连。每 5s 试一次，最多 [attempts] 次。
+     * 后台补连。最多 [attempts] 次，间隔从 [RECONNECT_DELAY_MS] 起按失败次数退避。
      *
      * 放在独立线程而不是 Handler 上，是因为 `connectBlocking()` 会阻塞在 `socket.connect()`，
      * 而调用方可能正是蓝牙进程里的 A2DP handler 线程 —— 不能把它卡住。
      *
      * 用 while 循环而不是「失败后递归调用自己」：递归时本线程仍然 alive，
      * 入口处的 `reconnectThread?.isAlive` 守卫会直接把续期请求丢掉，只重试一次。
+     *
+     * ## 为什么要退避
+     *
+     * 原来固定 5s。配合 `disconnect()` 每次断开都**新开**一个 attempts=2/3 的线程，
+     * 一旦链路处于「连上就被踢」的状态，就是 `connect → 断 → 5s → connect → 断`
+     * 的等周期空转，UI 每 5 秒跳一次。现在把等待时间随 [consecutiveFailures]
+     * 平方增长（5s → 10s → 20s，封顶 30s），让回路频率指数衰减；
+     * 达到 [MAX_CONSECUTIVE_FAILURES] 后 [isCoolingDown] 直接令整个循环退出。
      */
     private fun scheduleReconnect(address: String, attempts: Int) {
         if (attempts <= 0) return
         if (reconnectThread?.isAlive == true) return
+        // 已在冷却期就不必起线程了 —— 起来也只会在第一轮被 isCoolingDown 挡回去。
+        if (isCoolingDown()) return
         reconnectThread = Thread({
             var left = attempts
             while (left > 0 && started.get()) {
+                // 退避：按「已经连续废掉几次连接」放大等待。
+                // 用 consecutiveFailures 而不是 (attempts - left)，因为后者每轮
+                // disconnect 都会从 0 重来，永远只有 5s。
+                val backoff = RECONNECT_DELAY_MS * consecutiveFailures.coerceAtMost(6)
+                val wait = backoff.coerceIn(RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS)
                 try {
-                    Thread.sleep(RECONNECT_DELAY_MS)
+                    Thread.sleep(wait)
                 } catch (e: InterruptedException) {
                     return@Thread
                 }
                 if (isConnected) return@Thread
+                if (isCoolingDown()) {
+                    Log.i(TAG, "reconnect loop exits: cooling down after repeated failures")
+                    return@Thread
+                }
                 val adapter = appContext
                     ?.getSystemService(android.bluetooth.BluetoothManager::class.java)
                     ?.adapter ?: return@Thread
                 val device = runCatching { adapter.getRemoteDevice(address) }.getOrNull()
                     ?: return@Thread
-                Log.i(TAG, "reconnect attempt ($left left) -> $address")
+                Log.i(TAG, "reconnect attempt ($left left, waited ${wait}ms) -> $address")
                 if (runCatching { connectBlocking(device) }.getOrDefault(false)) return@Thread
                 left--
             }
@@ -880,6 +1190,13 @@ object FiilRfcommController {
                 )
                 val wasGatt = usingGatt
                 disconnect("silent-channel")
+                // disconnect() 内部已经记过账，连续失败到阈值会进冷却。
+                // 这里必须立刻判断：否则「换通道」这条路径会绕过刹车，
+                // 变成 SPP→GATT→SPP 的无界翻转（正是回路 A 的第二种形态）。
+                if (isCoolingDown()) {
+                    Log.i(TAG, "silence probe exits: cooling down after repeated unhealthy connects")
+                    return@Thread
+                }
                 // SPP 静默 → 换 BLE GATT 再试；GATT 也静默 → 回 SPP 翻转 UUID 顺序。
                 if (!wasGatt) {
                     val dev = runCatching {
@@ -925,7 +1242,10 @@ object FiilRfcommController {
             }
             if (n <= 0) continue
             // 记下「这条通道真的收到东西了」，静默探测据此判断是否连错了通道。
+            // everReceivedData 是给断线记账用的布尔印记（见 noteDisconnectHealth）：
+            // 连上了却从未收到字节的断开，说明链路根本不通，要计入连续失败。
             lastRxAt = System.currentTimeMillis()
+            everReceivedData = true
             // 收到数据就说明通道选对了，把之前的纠偏标记清掉，避免下次连接被它带偏。
             if (preferCustomNext != null) preferCustomNext = null
             val total = carried + n
@@ -1024,7 +1344,7 @@ object FiilRfcommController {
                 FiilMate.Query.MAF_STATUS -> {
                     val v = frame.byteAt(0, -1)
                     if (v in 0..4) {
-                        ancMode = v
+                        applyAncFromDevice(v)
                         ackOp(KEY_ANC)
                         publishState()
                     }
@@ -1230,7 +1550,7 @@ object FiilRfcommController {
                         else -> raw
                     }
                     if (v in 0..4) {
-                        ancMode = v
+                        applyAncFromDevice(v)
                         ackOp(KEY_ANC)
                         publishState()
                     }
@@ -1403,10 +1723,44 @@ object FiilRfcommController {
     private fun handleAnc(frame: FiilGaia.Frame) {
         val v = FiilGaia.byteAt(frame, 1, -1)
         if (v in 0..4) {
-            ancMode = v
+            applyAncFromDevice(v)
             ackOp(KEY_ANC)
             publishState()
         }
+    }
+
+    /**
+     * 采纳耳机回报的 ANC 档位，但跳过「切换还没落定」窗口里的过期回报。
+     *
+     * 三个回包入口都走这里：[FiilMate.Query.MAF_STATUS]、Mate 主动通知、
+     * [handleAnc]（GAIA）。它们原来都是直接 `ancMode = v`，于是用户刚点完
+     * 「通透」、耳机还没切完时收到的那条**旧状态回报**会把乐观值打回去，
+     * 界面闪回旧模式；等真回包到了再闪回新模式。
+     *
+     * 规则：
+     *  - 没有待确认目标（`pendingAncTarget < 0`）→ 正常采纳；
+     *  - 窗口已过 → 正常采纳并清掉目标（耳机最终说了算，失败就该显示失败）；
+     *  - 窗口内且回包与目标一致 → 采纳并清掉目标（提前确认，后续恢复正常采纳）；
+     *  - 窗口内但回包不一致 → **丢弃**，这是切换途中的过期快照。
+     */
+    private fun applyAncFromDevice(value: Int) {
+        val target = pendingAncTarget
+        if (target < 0) {
+            ancMode = value
+            return
+        }
+        if (android.os.SystemClock.elapsedRealtime() - pendingAncAt >= ANC_CONFIRM_WINDOW_MS) {
+            // 窗口已过：耳机没有在预期时间内确认，以它回报的为准。
+            pendingAncTarget = -1
+            ancMode = value
+            return
+        }
+        if (value == target) {
+            pendingAncTarget = -1
+            ancMode = value
+            return
+        }
+        Log.i(TAG, "anc reply $value ignored, pending target=$target")
     }
 
     // ------------------------------------------------------------------
@@ -1543,6 +1897,30 @@ object FiilRfcommController {
      */
     fun setAnc(mode: Int) {
         expectAckIfChanged(KEY_ANC, "降噪切换", mode) { ancMode }
+        // ⚠️ 必须先乐观写入本地值，再发命令。
+        //
+        // 这个顺序是「切换时图标闪一下旧值再闪回新值」的唯一成因：
+        //  1. UI 点了「通透」→ miLink 进程立刻把 AncBatteryModel.ancState 写成 2，
+        //     并 postDelayed 发 HeadsetModeChanged，界面马上显示「通透」（正确）；
+        //  2. 同一个调用里 sendAncSelect() 把 ACTION_ANC_SELECT 发到蓝牙进程，
+        //     走到这里发出 FIIL 命令 —— 但耳机回包 MAF_STATUS 要 1~2 秒才到，
+        //     这期间 `ancMode` 还是旧值（降噪=1）；
+        //  3. 期间任何一次 publishState()（电量心跳、A2DP 事件、连接状态刷新）
+        //     都会用 snapshot() 把 **旧值** 打包进 ACTION_STATE 广播出去；
+        //  4. miLink 进程收到 ACTION_STATE 后无条件执行 `ancMode = status.ancMode`
+        //     （MiLinkServiceHook.handleBroadcast），于是界面闪回「降噪」；
+        //  5. 等耳机回包到达、ancMode 更新为 2，再 publishState()，界面又闪回「通透」。
+        // 用户看到的正是「闪一下旧值、再闪一下新值」。
+        //
+        // 修法：把本地值提前到发命令之前写。这样上面第 3 步广播出去的就已经是目标值，
+        // 不会再出现旧值回灌。若耳机最终没切成功，expectAckIfChanged 的 2.5s 超时
+        // 机制仍会走 broadcastOpFailed() 把真实回读值纠正回来（见 expectAck 的
+        // `if (now == op.beforeValue)` 分支），所以不会把失败伪装成成功。
+        ancMode = mode
+        // 同时登记待确认目标：窗口内耳机若先回报旧状态（切换还没落定时很常见），
+        // applyAncFromDevice 会把它当过期快照丢弃，避免乐观值被打回去。
+        pendingAncTarget = mode
+        pendingAncAt = android.os.SystemClock.elapsedRealtime()
         if (isMateDialect && FiilModels.supportsMateMaf(earType)) {
             RfcommLog.i(appContext, TAG, "setAnc -> MATE cid=44 mode=$mode")
             sendMate(FiilMate.Cid.SET_MAF, 0, byteArrayOf(mode.toByte()))
@@ -1779,6 +2157,17 @@ object FiilRfcommController {
     /** 命令确认超时。取 2.5s：FIIL+ 自己的 CommandQueue 也是 3s 超时。 */
     private const val OP_TIMEOUT_MS = 2500L
 
+    /**
+     * ANC 切换后等待耳机回包确认的时间窗。
+     *
+     * 依据：官方 MiLink 用 25ms 延迟发通知，但耳机真正切完需要 1~2 秒。
+     * 本模块实测（用户日志 2026-10-30）：`19:49:24.380` 发 `setAnc mode=2`，
+     * `19:49:26.467` 收到 cid=0x0C 状态回报（值 02），间隔 **2.1s**。
+     * 取 3.5s：比实测最坏值留 1.4s 余量，又明显小于 30s 的电量心跳周期，
+     * 窗口内不会长时期屏蔽耳机的真实状态。
+     */
+    private const val ANC_CONFIRM_WINDOW_MS = 3_500L
+
     // 待确认操作的键。GAIA 与 Mate 用不同键，避免两套命令空间串号。
     private const val KEY_ANC = "anc"
     private const val KEY_EQ = "eq"
@@ -2011,6 +2400,30 @@ object FiilRfcommController {
     fun preferredDisplayName(device: BluetoothDevice): String? {
         val alias = runCatching { device.alias }.getOrNull()
         return if (!alias.isNullOrBlank()) alias else device.name
+    }
+
+    /**
+     * 当前实际连接的设备（未连接时返回 null）。
+     *
+     * 供 `pods/FiilCodec.kt` 反射 `A2dpService.getCodecStatus(BluetoothDevice)` 使用 ——
+     * 那个 API 需要**真实的 BluetoothDevice 对象**，而 LDAC 状态查询发生在
+     * 「UI 初次拉起」这种时刻，此时 [deviceAddress] 可能还没被任何链路回调填上。
+     *
+     * ⚠️ 必须校验 [isConnected]：只判 `deviceAddress != null` 是不够的。
+     * 本类的 [deviceAddress] 只在两台机器上被赋值（连上时），**断开时不会清空**
+     * （[disconnect] / [cleanupSocket] 都不碰它，因为它们要保留「上次连的是谁」
+     * 用于重连）。所以断开后它仍然指向旧设备，而 `getCodecStatus(旧设备)`
+     * 在系统侧会返回 null → LDAC 状态被判定为「未知」→ UI 整块不渲染。
+     */
+    fun connectedDevice(): BluetoothDevice? {
+        if (!isConnected) return null
+        val addr = deviceAddress ?: return null
+        return runCatching {
+            appContext
+                ?.getSystemService(android.bluetooth.BluetoothManager::class.java)
+                ?.adapter
+                ?.getRemoteDevice(addr)
+        }.getOrNull()
     }
 
     fun deviceSdkInt(): Int = Build.VERSION.SDK_INT

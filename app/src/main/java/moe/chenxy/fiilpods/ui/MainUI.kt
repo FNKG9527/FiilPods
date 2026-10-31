@@ -48,6 +48,8 @@ import moe.chenxy.fiilpods.config.ConfigManager
 import moe.chenxy.fiilpods.config.PodImagePrefs
 import moe.chenxy.fiilpods.config.PodImageResource
 import moe.chenxy.fiilpods.pods.NoiseControlMode
+import moe.chenxy.fiilpods.pods.FiilCodec
+import moe.chenxy.fiilpods.pods.FiilModels
 import moe.chenxy.fiilpods.pods.OppoCompatBridge
 import moe.chenxy.fiilpods.pods.EqDevicePreset
 import moe.chenxy.fiilpods.pods.WearState
@@ -131,6 +133,14 @@ fun MainUI(
     val toneVolume = remember { mutableStateOf(-1) }
     /** 低延迟档位（FIIL 专有，cid=37 cmd=0，线值 0=音乐 1=游戏 2=视频，-1=未知）。 */
     val lowLatencyMode = remember { mutableStateOf(-1) }
+    /**
+     * LDAC 开关三态：`-1` 未知/本 ROM 反射不到 A2dpService（不渲染开关）、`0` 支持但未启用、`1` 已启用。
+     *
+     * 用 Int 而不是 Boolean 的原因：蓝牙进程里的 [moe.chenxy.fiilpods.pods.FiilCodec] 要反射
+     * `A2dpService.getCodecStatus(BluetoothDevice)` 才能知道耳机支不支持 LDAC；某些 ROM /
+     * 还没连上耳机时会返回 null。这种情况下必须能把开关整个藏掉，否则就是一个「点了不起作用」的假开关。
+     */
+    val ldacState = remember { mutableStateOf(-1) }
     val tabs = remember { MainTab.entries.toList() }
     var selectedTab by remember { mutableStateOf(MainTab.Module) }
     var hasAppliedDefaultTab by remember { mutableStateOf(false) }
@@ -178,6 +188,15 @@ fun MainUI(
     val eqDevicePresets = remember { mutableStateOf<List<EqDevicePreset>>(emptyList()) }
     val earphonePrefs = remember { mutableStateOf(PodImagePrefs.load(prefs)) }
     val productId = remember { mutableStateOf<String?>(null) }
+    /**
+     * 当前连接耳机的 earType（-1 = 未连接 / 未知）。
+     *
+     * 与 [productId] 同源：蓝牙进程把 `FiilStatus.earType` 塞进 `product_id` extra。
+     * 这里单独留着 Int 版本，是因为主页要拿它查
+     * [moe.chenxy.fiilpods.pods.PodImages] 显示对应型号的产品图；
+     * 每次都从 String 里 `toIntOrNull()` 既啰嗦，又容易在某条分支上漏同步。
+     */
+    val connectedEarType = remember { mutableIntStateOf(-1) }
 
     val canShowDetailPage = hookConnected.value
     val showEarphoneDetail = canShowDetailPage && !showDevicePicker
@@ -336,11 +355,40 @@ fun MainUI(
                         )
                     }
 
+                    OppoPodsAction.ACTION_PODS_LDAC_CHANGED -> {
+                        // 三态折叠：只要「状态未知」或「不支持」，一律落成 -1，让详情页把开关整个藏掉。
+                        //
+                        // 历史 Bug（用户报「控制页找不到 LDAC 开关」）：publishState 只在编码器
+                        // 状态**发生变化**时才有回调，用户第一次进详情页时什么都没变，于是 UI
+                        // 永远收不到这条广播、ldacState 一直停在 -1、if (ldacState >= 0) 不成立。
+                        // 修法是让 UI_INIT / REFRESH_STATUS 也主动发一次（见 BluetoothProcessHook）。
+                        val known = p1.getBooleanExtra(OppoPodsAction.EXTRA_LDAC_KNOWN, false)
+                        val supported = p1.getBooleanExtra(OppoPodsAction.EXTRA_LDAC_SUPPORTED, false)
+                        val enabled = p1.getBooleanExtra(OppoPodsAction.EXTRA_LDAC_ENABLED, false)
+                        ldacState.value = if (!known || !supported) -1 else if (enabled) 1 else 0
+                    }
+
+                    OppoPodsAction.ACTION_OPEN_CODEC_SETTINGS -> {
+                        // 蓝牙进程（后台）没法拉起 Activity，跳页请求转到这里执行。
+                        // 模块 App 此刻在前台，不受后台启动限制，才能真正把用户送到
+                        // 系统「蓝牙音频编解码器」页。
+                        runCatching { FiilCodec.openCodecSettings(context) }
+                            .onFailure { Log.w("FiilPods-MainUI", "open codec settings failed", it) }
+                    }
+
                     OppoPodsAction.ACTION_PODS_CONNECTED -> {
                         val deviceName = p1.getStringExtra("device_name")
                         val shouldOpenEarphones = connectingDeviceAddress != null || !hasAutoOpenedConnectedDevice
                         connectedDeviceAddress = p1.getStringExtra("address") ?: connectedDeviceAddress
                         productId.value = p1.getStringExtra("product_id") ?: productId.value
+                        // 主页的型号图靠这个值。蓝牙进程在 publishConnection 里把
+                        // `FiilStatus.earType` 塞成 product_id，这里随手解析成 Int 存下。
+                        // 解析失败（比如老版本蓝牙进程没塞这个 extra）就回退用设备名推断，
+                        // 再不行落 -1，主页那张「当前耳机」卡片直接不渲染。
+                        connectedEarType.intValue = p1.getStringExtra("product_id")
+                            ?.toIntOrNull()
+                            ?.takeIf { it > 0 }
+                            ?: FiilModels.earTypeOfName(deviceName)
                         connectingDeviceAddress = null
                         mainTitle.value = deviceName ?: ""
                         earphonePrefs.value = PodImagePrefs.upsertConnected(
@@ -366,6 +414,7 @@ fun MainUI(
                         if (hookConnectionState == "disconnected") {
                             connectedDeviceAddress = ""
                             productId.value = null
+                            connectedEarType.intValue = -1
                             mainTitle.value = ""
                             hookConnected.value = false
                             hasAutoOpenedConnectedDevice = false
@@ -382,9 +431,18 @@ fun MainUI(
                         mainTitle.value = ""
                         connectedDeviceAddress = ""
                         productId.value = null
+                        connectedEarType.intValue = -1
                         hookConnectionState = "disconnected"
                         hookConnected.value = false
                         hasAutoOpenedConnectedDevice = false
+                        // 断开后必须把 LDAC 状态打回「未知」。
+                        // 否则开关会带着上一台耳机的状态留在界面上：用户点它时
+                        // `setLdacEnabled()` 会先乐观更新成 1/0，再向蓝牙进程发
+                        // `ACTION_LDAC_SET`；蓝牙进程此时 `connectedDevice()` 返回 null，
+                        // 只能回一个 known=false —— 界面会闪一下再消失，观感是「点了没用」。
+                        // 打回 -1 后 `PodDetailPage` 的 `if (ldacState >= 0)` 直接不渲染这一项，
+                        // 断开态下不再出现一个必然无效的开关。
+                        ldacState.value = -1
                     }
 
                     OppoPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE -> {
@@ -424,6 +482,12 @@ fun MainUI(
             // 缺这一行时，低延迟广播虽然发得出去但 UI 收不到，
             // lowLatencyMode 永远停在 -1，详情页的「低延迟模式」选择器整块不渲染。
             addAction(OppoPodsAction.ACTION_PODS_LOW_LATENCY_MODE_CHANGED)
+            // 同理：LDAC 的编解码器状态由蓝牙进程反射 A2dpService 后回推，
+            // 不注册这个 action，ldacState 永远 -1，详情页的 LDAC 开关整块不渲染。
+            addAction(OppoPodsAction.ACTION_PODS_LDAC_CHANGED)
+            // 蓝牙进程（后台）不能拉起 Activity，LDAC 反射失败时它发这条广播，
+            // 由本进程（前台）代为打开系统编解码器页。
+            addAction(OppoPodsAction.ACTION_OPEN_CODEC_SETTINGS)
             addAction(OppoPodsAction.ACTION_PODS_CONNECTED)
             addAction(OppoPodsAction.ACTION_PODS_CONNECTION_STATE_CHANGED)
             addAction(OppoPodsAction.ACTION_PODS_DISCONNECTED)
@@ -627,6 +691,31 @@ fun MainUI(
         }
     }
 
+    /**
+     * LDAC 开关：**真开关**，不是「点了跳系统设置页」。
+     *
+     * 真正的切换动作发生在蓝牙进程 [moe.chenxy.fiilpods.hook.BluetoothProcessHook] 里：
+     * 它收到 [OppoPodsAction.ACTION_LDAC_SET] 后反射 `A2dpService.setCodecConfigPreference(...)`
+     * 把编解码器切成 LDAC，再用 `getCodecStatus(...)` 回读真实状态，最后发
+     * [OppoPodsAction.ACTION_PODS_LDAC_CHANGED] 把三态回推给这里。
+     *
+     * 为什么必须发给 `com.android.bluetooth`：A2dpService 只存在于蓝牙进程，模块 App 自己
+     * 那份 FiilCodec 反射不到（不同进程、不同 ClassLoader），发给自己是无效的。
+     * 同时发给 `com.xiaomi.bluetooth` 是因为 HyperOS 上耳机卡片偶发由该进程代理刷新。
+     */
+    fun setLdacEnabled(enabled: Boolean) {
+        // 乐观更新：开关立刻跟手，真值以回读广播为准（失败会被 publishState 改回去）。
+        ldacState.value = if (enabled) 1 else 0
+        for (pkg in arrayOf("com.android.bluetooth", "com.xiaomi.bluetooth")) {
+            Intent(OppoPodsAction.ACTION_LDAC_SET).apply {
+                putExtra(OppoPodsAction.EXTRA_LDAC_ENABLED, enabled)
+                setPackage(pkg)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                context.sendBroadcast(this)
+            }
+        }
+    }
+
     fun onDeviceDisconnect(device: BluetoothDevice) {
         connectingDeviceAddress = null
         pendingOpenEarphonesAfterPickerLoaded = false
@@ -761,6 +850,8 @@ fun MainUI(
                 showEarphoneDetail = showEarphoneDetail,
                 mainTitle = mainTitle.value,
                 displayTitle = displayTitle,
+                connectedEarType = connectedEarType.intValue,
+                connectedDeviceName = mainTitle.value,
                 displayBattery = displayBattery,
                 displayWearStatus = displayWearStatus,
                 displayAnc = displayAnc,
@@ -783,6 +874,8 @@ fun MainUI(
                 onToneVolumeChange = { setToneVolume(it) },
                 lowLatencyMode = lowLatencyMode.value,
                 onLowLatencyModeChange = { setLowLatencyMode(it) },
+                ldacState = ldacState.value,
+                onLdacChange = { setLdacEnabled(it) },
                 spatialAudioSupported = displayCapabilities.spatialAudioSupported,
                 spatialSoundSupported = displayCapabilities.spatialSoundSwitchSupported,
                 adaptiveModeEnabled = displayCapabilities.adaptiveSupported,
@@ -1159,10 +1252,27 @@ private fun setLauncherIconHidden(context: Context, hidden: Boolean) {
     context.packageManager.setComponentEnabledSetting(component, state, PackageManager.DONT_KILL_APP)
 }
 
+/**
+ * 通知指定进程「配置变了」，让它重读一次远端 SharedPreferences。
+ *
+ * ⚠️ 这里必须**同时**发两个 action：
+ * - [OppoPodsAction.ACTION_CONFIG_CHANGED]（`chen.action.oppopods.config_changed`）
+ * - [FiilAction.ACTION_CONFIG_CHANGED]（`moe.chenxy.fiilpods.action.CONFIG_CHANGED`）
+ *
+ * 历史上两个常量各写了一半：发送端用 OppoPodsAction 的版本，而
+ * `BluetoothProcessHook` / `SettingsHook` / `MiLinkServiceHook` 三个接收端注册的都是
+ * FiilAction 的版本 —— 两边字符串永远不相等，于是配置热更新这条链路**从来没通过**，
+ * 用户改完设置必须重启进程（或重启手机）才生效。两个都发是最小改动且不可能再错配。
+ */
 private fun broadcastConfigChanged(context: Context, packageName: String) {
-    Intent(OppoPodsAction.ACTION_CONFIG_CHANGED).apply {
-        setPackage(packageName)
-        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-        context.sendBroadcast(this)
+    for (action in arrayOf(
+        OppoPodsAction.ACTION_CONFIG_CHANGED,
+        moe.chenxy.fiilpods.pods.FiilAction.ACTION_CONFIG_CHANGED,
+    )) {
+        Intent(action).apply {
+            setPackage(packageName)
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            context.sendBroadcast(this)
+        }
     }
 }

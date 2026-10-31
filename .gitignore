@@ -42,3 +42,9 @@ tools/probe/FiilProbe/obj/
 _bt15_out/
 _bt17_out/
 _backup_old_ui/
+
+# 会话级逆向/调试产物（体积大：反编译目录 + 拉取的系统 APK，不入库）
+_dev/
+
+# 版本拓扑重建用的临时备份（不入库）
+_tmp_v221_state/

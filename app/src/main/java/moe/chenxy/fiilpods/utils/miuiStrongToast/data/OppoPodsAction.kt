@@ -55,6 +55,24 @@ object OppoPodsAction {
     // 所以另加一对 action 承载「第几档」，而不是「开/关」。
     const val ACTION_LOW_LATENCY_MODE_SET = "chen.action.oppopods.low_latency_mode_set"
     const val ACTION_PODS_LOW_LATENCY_MODE_CHANGED = "chen.action.oppopods.pods_low_latency_mode_changed"
+
+    // ---- LDAC 编解码器开关（v2.2.0 新增）----
+    // 这是真开关：蓝牙进程内反射 A2dpService.setCodecConfigPreference 切 LDAC，
+    // 并通过 CODEC_CONFIG_CHANGED 回读真实状态。不是假的「点了跳设置页」。
+    const val ACTION_LDAC_SET = "chen.action.oppopods.ldac_set"
+    const val ACTION_PODS_LDAC_CHANGED = "chen.action.oppopods.pods_ldac_changed"
+    const val EXTRA_LDAC_ENABLED = "ldac_enabled"
+    const val EXTRA_LDAC_SUPPORTED = "ldac_supported"
+    const val EXTRA_LDAC_KNOWN = "ldac_known"
+
+    // 蓝牙进程 → 模块 App：请求把用户带到系统「蓝牙音频编解码器」页。
+    //
+    // 为什么必须绕这一圈：`com.android.bluetooth` 是后台进程，Android 10+
+    // 对后台进程 `startActivity` 有硬性限制，调用会被系统直接丢弃（不抛异常，
+    // 用户看不到任何反应）。模块 App 自己在前台，由它来拉起页面才有效。
+    // 蓝牙进程只负责发这条广播，不再自己 startActivity。
+    const val ACTION_OPEN_CODEC_SETTINGS = "chen.action.oppopods.open_codec_settings"
+
     const val EXTRA_LOW_LATENCY_MODE = "mode"
 
     const val EXTRA_EQ_ENTRIES_JSON = "eq_entries_json"

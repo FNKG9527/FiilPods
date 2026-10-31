@@ -33,6 +33,12 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        // Android 13+ 必须先拿到 POST_NOTIFICATIONS 运行时权限，
+        // 否则「焦点通知」开得再对，NotificationManager.notify() 也会被系统静默丢弃
+        // （用户 m27504 Bug 2 的根因之一）。必须在 super.onCreate() 之后、
+        // 且 Activity 尚未 STARTED 时注册 launcher，所以放在这里。
+        moe.chenxy.fiilpods.utils.NotifPermission.ensure(this)
+
         setContent {
             val prefs = remember { getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE) }
             val themeMode = remember { mutableStateOf(prefs.getInt("theme_mode", 0)) }

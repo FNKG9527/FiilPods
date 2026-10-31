@@ -3,6 +3,15 @@
 
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!-- Android 13 (API 33) 起，发通知必须同时具备这两条：
+         ① manifest 声明 POST_NOTIFICATIONS（否则 NotificationManager.notify 直接被丢）
+         ② 运行时用户授权（否则通知栏里什么都不出现）
+         Bug 2「焦点通知开关无作用、通知栏没有耳机控制卡片」的第一层根因就是这里缺失。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 部分 ROM 上焦点通知（MIUI 强提示）还会检查 FOREGROUND_SERVICE，
+         这里一并声明，避免被 NotificationManager 的服务白名单拦下。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <queries>
         <package android:name="com.android.bluetooth" />

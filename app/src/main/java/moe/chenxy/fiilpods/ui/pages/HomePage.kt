@@ -2,6 +2,7 @@ package moe.chenxy.fiilpods.ui.pages
 
 import android.content.Context
 import android.os.Build
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -15,13 +16,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -33,6 +37,7 @@ import java.util.Date
 import java.util.Locale
 import moe.chenxy.fiilpods.BuildConfig
 import moe.chenxy.fiilpods.R
+import moe.chenxy.fiilpods.pods.PodImages
 import moe.chenxy.fiilpods.ui.components.AppIcons
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -50,6 +55,17 @@ fun HomePage(
     bondedDeviceCount: Int,
     onBluetoothStatusClick: () -> Unit,
     onPairedBluetoothClick: () -> Unit,
+    /**
+     * 当前连着的耳机型号 earType（`-1` = 没连 / 型号未知）。
+     *
+     * 来源是蓝牙进程回推的 [moe.chenxy.fiilpods.pods.FiilStatus.earType]，
+     * 用它去 [PodImages] 查这张型号的产品图——用户连哪台就显示哪台。
+     */
+    connectedEarType: Int = -1,
+    /** 当前连着的耳机名称，用于卡片副标题。 */
+    connectedDeviceName: String = "",
+    /** 点击「当前耳机」卡片时的动作（目前是切到耳机页）。 */
+    onEarphoneCardClick: () -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(0.dp),
     bottomContentPadding: Dp = 16.dp,
 ) {
@@ -72,6 +88,15 @@ fun HomePage(
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (connectedEarType > 0) {
+            item {
+                ConnectedEarphoneCard(
+                    earType = connectedEarType,
+                    deviceName = connectedDeviceName,
+                    onClick = onEarphoneCardClick,
+                )
+            }
+        }
         item {
             StatusGrid(
                 active = active,
@@ -85,6 +110,70 @@ fun HomePage(
         }
         item {
             InfoCard(systemInfo = systemInfo, xposedService = xposedService)
+        }
+    }
+}
+
+/**
+ * 主页顶部的「当前耳机」卡片：显示当前连接型号的产品图与型号名。
+ *
+ * 产品图来自 FIIL+ 逆向资源（见 [PodImages]）。官方只给了 26 个型号出图，
+ * 老型号（Driifter / Carat / Bestie / Runner 等）没有产品图，
+ * [PodImages.drawableOf] 会落到 `fiil_unknow` 兜底图——与官方 App 的行为一致。
+ */
+@Composable
+private fun ConnectedEarphoneCard(
+    earType: Int,
+    deviceName: String,
+    onClick: () -> Unit,
+) {
+    val modelName = moe.chenxy.fiilpods.pods.FiilModels.nameOf(earType)
+    val displayName = deviceName.ifBlank { modelName }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        pressFeedbackType = PressFeedbackType.Tilt,
+        showIndication = true,
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // 官方产品图尺寸不统一（580×420 / 800×800 / 240×240），
+            // 必须用 Fit 缩放进固定尺寸盒子，否则 800×800 的会把整张卡片撑爆。
+            Box(
+                modifier = Modifier.size(88.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(PodImages.drawableOf(earType)),
+                    contentDescription = modelName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = displayName,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = if (modelName != displayName) modelName else "已连接",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Icon(
+                modifier = Modifier.size(20.dp),
+                imageVector = AppIcons.Headphones,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
         }
     }
 }

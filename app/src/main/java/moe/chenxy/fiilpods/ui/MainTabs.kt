@@ -79,6 +79,10 @@ internal fun MainTabsScaffold(
     showEarphoneDetail: Boolean,
     mainTitle: String,
     displayTitle: String,
+    /** 当前连接耳机的 earType（-1 = 未连接 / 未知），主页用它显示型号产品图。 */
+    connectedEarType: Int,
+    /** 当前连接耳机名称，主页「当前耳机」卡片副标题用。 */
+    connectedDeviceName: String,
     displayBattery: BatteryParams,
     displayWearStatus: WearStatus,
     displayAnc: NoiseControlMode,
@@ -99,8 +103,11 @@ internal fun MainTabsScaffold(
     /** 语音提示音量线值 0=高 1=中 2=低 3=静音，-1 表示未知。 */
     toneVolume: Int,
     lowLatencyMode: Int,
+    /** LDAC 三态：-1=未知/不支持（不渲染开关）、0=支持但未启用、1=已启用。 */
+    ldacState: Int,
     onToneVolumeChange: (Int) -> Unit,
     onLowLatencyModeChange: (Int) -> Unit,
+    onLdacChange: (Boolean) -> Unit,
     spatialAudioSupported: Boolean,
     spatialSoundSupported: Boolean,
     adaptiveModeEnabled: Boolean,
@@ -224,6 +231,9 @@ internal fun MainTabsScaffold(
                         pageBottomContentPadding = pageBottomContentPadding,
                         restartingScopes = restartingScopes,
                         onShowRestartScopeDialog = onShowRestartScopeDialog,
+                        connectedEarType = connectedEarType,
+                        connectedDeviceName = connectedDeviceName,
+                        onEarphoneCardClick = { onTabSelected(MainTab.Earphones) },
                     )
 
                     MainTab.Earphones -> EarphonesTabShell(
@@ -250,12 +260,15 @@ internal fun MainTabsScaffold(
                         onDualDeviceConnectionChange = onDualDeviceConnectionChange,
                         toneVolume = toneVolume,
                         lowLatencyMode = lowLatencyMode,
+                        ldacState = ldacState,
                         onToneVolumeChange = onToneVolumeChange,
                         onLowLatencyModeChange = onLowLatencyModeChange,
+                        onLdacChange = onLdacChange,
                         spatialAudioSupported = spatialAudioSupported,
                         spatialSoundSupported = spatialSoundSupported,
                         adaptiveModeEnabled = adaptiveModeEnabled,
                         boxImagePath = currentEarphonePref?.boxImagePath,
+                        earType = connectedEarType,
                         connectedDeviceAddress = connectedDeviceAddress,
                         connectingDeviceAddress = connectingDeviceAddress,
                         showConnectErrorDialog = showConnectErrorDialog,
@@ -355,6 +368,9 @@ private fun ModuleTabPage(
     pageBottomContentPadding: Dp,
     restartingScopes: Boolean,
     onShowRestartScopeDialog: () -> Unit,
+    connectedEarType: Int,
+    connectedDeviceName: String,
+    onEarphoneCardClick: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
     Scaffold(
@@ -388,6 +404,9 @@ private fun ModuleTabPage(
             bondedDeviceCount = bondedDeviceCount,
             onBluetoothStatusClick = onBluetoothStatusClick,
             onPairedBluetoothClick = onPairedBluetoothClick,
+            connectedEarType = connectedEarType,
+            connectedDeviceName = connectedDeviceName,
+            onEarphoneCardClick = onEarphoneCardClick,
             contentPadding = pagePadding,
             bottomContentPadding = pageBottomContentPadding,
         )
@@ -420,12 +439,17 @@ private fun EarphonesTabShell(
     /** 语音提示音量线值 0=高 1=中 2=低 3=静音，-1 表示未知。 */
     toneVolume: Int,
     lowLatencyMode: Int,
+    /** LDAC 三态：-1=未知/不支持（不渲染开关）、0=支持但未启用、1=已启用。 */
+    ldacState: Int,
     onToneVolumeChange: (Int) -> Unit,
     onLowLatencyModeChange: (Int) -> Unit,
+    onLdacChange: (Boolean) -> Unit,
     spatialAudioSupported: Boolean,
     spatialSoundSupported: Boolean,
     adaptiveModeEnabled: Boolean,
     boxImagePath: String?,
+    /** 当前耳机 earType，用户没自定义产品图时详情页用它回落到对应型号图。 */
+    earType: Int,
     connectedDeviceAddress: String,
     connectingDeviceAddress: String?,
     showConnectErrorDialog: Boolean,
@@ -489,12 +513,15 @@ private fun EarphonesTabShell(
             onDualDeviceConnectionChange = onDualDeviceConnectionChange,
             toneVolume = toneVolume,
             lowLatencyMode = lowLatencyMode,
+            ldacState = ldacState,
             onToneVolumeChange = onToneVolumeChange,
             onLowLatencyModeChange = onLowLatencyModeChange,
+            onLdacChange = onLdacChange,
             spatialAudioSupported = spatialAudioSupported,
             spatialSoundSupported = spatialSoundSupported,
             adaptiveModeEnabled = adaptiveModeEnabled,
             boxImagePath = boxImagePath,
+            earType = earType,
             connectedDeviceAddress = connectedDeviceAddress,
             connectingDeviceAddress = connectingDeviceAddress,
             showConnectErrorDialog = showConnectErrorDialog,

@@ -80,6 +80,15 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
 
         /** 设置页支持的全部档位（顺序即页面显示顺序）。 */
         private const val LEVELS_ALL = "0100;0101;0102;0103;0200;0201"
+
+        /**
+         * `PersonalAssistantSyncInfoProvider.RECORD_UNSYNCED` 的值。
+         *
+         * 宿主 `MiuiHeadsetFragment.updateAncMode` / `updateAncLevel` 的唯一放行条件，
+         * 详见 [commonCommandReply] 的注释。**不要改成 "0"** —— 那是 `RECORD_SYNCED`，
+         * 会让宿主以为「耳机未佩戴」而拦下整条降噪指令。
+         */
+        private const val COMMAND_WEAR_UNSYNCED = "1"
     }
 
     private val knownAddresses = linkedSetOf<String>()
@@ -132,8 +141,26 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
         hookModuleEntry()
     }
 
-    private fun fakeDeviceId(): String = FiilConfig.FAKE_DEVICE_ID
-    private fun fakeSupport(): String = FiilConfig.FAKE_SUPPORT
+    /**
+     * 伪装耳机型号（deviceId）。
+     *
+     * ⚠️ 必须读 [moe.chenxy.fiilpods.config.ConfigManager]，**不能**直接读
+     * [FiilConfig.FAKE_DEVICE_ID] 常量 —— 常量只是「留空时的兜底默认值」。
+     * 用户以前可以在设置页改这个值，v2.2.0 一度把入口删了、注入侧退化成常量，
+     * 结果设置页再改也不生效（改了等于没改）。现在入口恢复了，这里必须跟着
+     * 走 ConfigManager，否则「伪装耳机型号」就是个假功能。
+     *
+     * ConfigManager 在 settings 进程里由 [HookContext.attach] 灌入远端 prefs，
+     * 拿不到时 [moe.chenxy.fiilpods.config.ConfigManager.fakeDeviceId] 自己会
+     * 回落到 `DEFAULT_FAKE_DEVICE_ID`，所以这里是安全的。
+     */
+    private fun fakeDeviceId(): String = runCatching {
+        moe.chenxy.fiilpods.config.ConfigManager.fakeDeviceId()
+    }.getOrDefault(FiilConfig.FAKE_DEVICE_ID)
+
+    private fun fakeSupport(): String = runCatching {
+        moe.chenxy.fiilpods.config.ConfigManager.fakeSupport()
+    }.getOrDefault(FiilConfig.FAKE_SUPPORT)
 
     // ------------------------------------------------------------------
     // 1. Activity 入口：改 Intent
@@ -187,28 +214,38 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
     // ------------------------------------------------------------------
 
     private fun hookSupportChecks() {
-        hookStringStatic(CLS_ID_CONSTANTS, "checkSupport") { it }
-        hookStringStatic(CLS_ID_CONSTANTS, "isTWS01Headset") { it }
-        hookStringStatic(CLS_ID_CONSTANTS, "isK77sHeadset") { false }
+        // 这三个方法的真实签名都是 `static boolean xxx(String deviceId)`
+        // （HeadsetIDConstants.java:103 checkSupport / :120 isTWS01Headset /
+        // :214 isK77sHeadset），必须按 boolean 回写。早前误用 hookStringStatic
+        // 回写了入参 String —— 除了「01010607 本身就在原生白名单」这一巧合外，
+        // 一旦用户把伪装型号改成白名单外的 id，checkSupport 就会返回 false，
+        // 原生耳机设置页 checkStartMiuiHeadset 直接 return false 打不开。
+        hookBooleanStatic(CLS_ID_CONSTANTS, "checkSupport", true)
+        hookBooleanStatic(CLS_ID_CONSTANTS, "isTWS01Headset", true)
+        hookBooleanStatic(CLS_ID_CONSTANTS, "isK77sHeadset", false)
         hookBleMmaConnect(Context::class.java)
         runCatching { hookBleMmaConnect(findClass(CLS_SERVICE_IFACE)) }
             .onFailure { logW("isBleMmaConnect(service) skipped", it) }
     }
 
     /**
-     * 所有「参数是一个设备 id 字符串」的静态判定统一走这里：
+     * 「参数是一个设备 id 字符串、返回 boolean」的静态判定。
+     *
      * 只有值等于（或以之开头的）伪造 id 时才改写返回值，避免污染真实小米耳机。
+     * 早前这里用的是「回写入参 String」的写法，对 boolean 方法属于类型错配 ——
+     * 框架侧类型校验会把它吞成静默失效，只在用户把伪装型号改成原生白名单外的
+     * id 时才暴露（原生耳机设置页打不开）。
      */
-    private fun hookStringStatic(className: String, methodName: String, result: (String) -> Any) {
+    private fun hookBooleanStatic(className: String, methodName: String, result: Boolean) {
         runCatching {
             val m = findMethod(className, methodName, String::class.java)
             hookAfter(m) { param ->
                 val value = param.args.getOrNull(0) as? String ?: return@hookAfter
                 val id = fakeDeviceId()
                 if (value != id && !value.startsWith(id)) return@hookAfter
-                param.setResult(result(value))
+                param.setResult(result)
             }
-        }.onFailure { logW("hook $className.$methodName(String) skipped", it) }
+        }.onFailure { logW("hook $className.$methodName(String)->boolean skipped", it) }
     }
 
     private fun hookBleMmaConnect(serviceType: Class<*>) {
@@ -272,13 +309,19 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
         hookProxyBefore(
             CLS_SERVICE_PROXY,
             "setCommonCommand",
-            Int::class.java,
+            // ⚠️ 必须是**原始 int**：AIDL 生成的 Proxy 方法签名是
+            // `setCommonCommand(int, String, BluetoothDevice)`。
+            // 写成 `Int::class.java` 会变成 `java.lang.Integer`（装箱类），
+            // `getDeclaredMethod` 找不到就抛 NoSuchMethodException，
+            // 被 hookProxyBefore 的 runCatching 吞掉 → Hook 静默失效，
+            // 只在 logcat 里留一句 "setCommonCommand skipped"，非常难查。
+            Int::class.javaPrimitiveType!!,
             String::class.java,
             BluetoothDevice::class.java,
         ) { param ->
             val device = param.args.getOrNull(2) as? BluetoothDevice
             if (!isFiilPod(device)) return@hookProxyBefore
-            param.setResult(if (param.args.getOrNull(0) == 102) "0" else "1")
+            param.setResult(commonCommandReply(param.args.getOrNull(0) as? Int ?: -1))
         }
         // 这些调用直接吞掉，返回 null 即可
         listOf(
@@ -304,7 +347,10 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
         hookProxyBefore(
             CLS_SERVICE_PROXY,
             "changeAncMode",
-            Int::class.java,
+            // 同上：AIDL 是 `changeAncMode(int, BluetoothDevice)`，必须原始 int。
+            // 这里以前写成装箱 `Int::class.java`，导致真正下发降噪模式的 Hook
+            // **从来没装上过** —— 原生页点降噪按钮等于什么都没发生。
+            Int::class.javaPrimitiveType!!,
             BluetoothDevice::class.java,
         ) { param ->
             val device = param.args.getOrNull(1) as? BluetoothDevice
@@ -750,6 +796,59 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
     // 7. ANC 反向映射（设置页 → 耳机）
     // ------------------------------------------------------------------
 
+    /**
+     * `IMiuiHeadsetService.setCommonCommand(int code, String arg, BluetoothDevice)` 的伪造返回值。
+     *
+     * ## 为什么这份映射必须精确
+     *
+     * 原生页 `MiuiHeadsetFragment` 用 `setCommonCommand(102, "", device)` 问耳机
+     * **「佩戴状态是否已同步」**，返回值直接决定 `updateAncMode` / `updateAncLevel`
+     * 是否真的把降噪指令发出去：
+     *
+     * ```java
+     * // MiuiHeadsetFragment.java:3184 / :3265
+     * commonCommand = mService.setCommonCommand(102, "", mDevice);
+     * // :3197 门控 B —— 01010607 命中 isK73Headset，走这一支
+     * } else if (HeadsetIDConstants.isK73Headset(mDeviceId)
+     *         || HeadsetIDConstants.isK75Headset(mDeviceId)) {
+     *     if (z && RECORD_SYNCED.equals(commonCommand)) {       // "0"
+     *         ToastUtil.show(miheadset_anc_indicate); return;   // ← 弹「无法设置」并直接返回
+     *     } else if (z && !RECORD_UNSYNCED.equals(commonCommand)) {  // != "1"
+     *         ToastUtil.show(miheadset_single_ear_indicate); return;
+     *     }
+     * }
+     * ```
+     *
+     * 也就是说 **只有返回 `"1"`（`RECORD_UNSYNCED`）才能穿过门控**，
+     * 走到 `:3216 mService.changeAncMode(i, mDevice)`。
+     * 旧实现固定返回 `"0"`，一行之差就造成「融合中心 › 更多设置 › 降噪按钮点了没反应」。
+     *
+     * 其余 code 的返回值是各自开关的回显值，逐个核对过宿主用法：
+     *  - `110` 版本号会被 `Integer.parseInt`，必须是纯数字；
+     *  - `106` 要求 `length() == 12`，否则宿主自己回落 `000011101110`；
+     *  - `112` 重力感应 / `115` 通知开关 / `117` 静默升级，宿主用
+     *    `RECORD_UNSYNCED.equals(...)` 或 `"true".equals(...)` 判「开」；
+     *  - `109` 若返回非空会被 `updateAtUiInfo` 当 4 段 `|` 载荷解析，
+     *    这里给空串让它安全短路。
+     */
+    private fun commonCommandReply(code: Int): String = when (code) {
+        // 佩戴状态：RECORD_UNSYNCED="1"，唯一能穿过 updateAncMode/updateAncLevel 门控的值
+        102 -> COMMAND_WEAR_UNSYNCED
+        // 设备型号串，宿主强制长度 12
+        106 -> "000011101110"
+        // 本地版本号：Integer.parseInt 解析
+        110 -> "1"
+        // 重力感应开关：宿主用 RECORD_UNSYNCED 比较
+        112 -> COMMAND_WEAR_UNSYNCED
+        // 通知详情开关：宿主用 "true".equals 判开
+        115 -> "true"
+        // 静默升级开关：同上
+        117 -> "true"
+        // 会被 updateAtUiInfo 当 4 段载荷解析，给空串安全短路
+        109 -> ""
+        else -> COMMAND_WEAR_UNSYNCED
+    }
+
     private fun applyAncFromSettingsMode(miMode: Int) {
         val mode = when (miMode) {
             1 -> 1
@@ -846,7 +945,13 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
                             updateFragments()
                             refreshControlCards()
                         }
-                        FiilAction.ACTION_CONFIG_CHANGED -> updateFragments()
+                        FiilAction.ACTION_CONFIG_CHANGED -> {
+                            // 用户在设置页改了「伪装耳机型号」→ 这里必须先重读 prefs，
+                            // 否则 fakeDeviceId() 还是旧值，详情页的注入判定会继续用旧型号，
+                            // 表现为「改完没反应，得重启手机」。
+                            refreshConfigFromPrefs()
+                            updateFragments()
+                        }
                     }
                 }
             }, filter, Context.RECEIVER_EXPORTED)

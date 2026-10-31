@@ -74,7 +74,11 @@ abstract class HookContext(
                 prefs.registerOnSharedPreferenceChangeListener { sp, key ->
                     if (key == moe.chenxy.fiilpods.config.ConfigManager.PREF_KEY_CONFIG_JSON ||
                         key == moe.chenxy.fiilpods.config.ConfigManager.PREF_KEY_FOCUS_NOTIFICATION ||
-                        key == moe.chenxy.fiilpods.config.ConfigManager.PREF_KEY_ISLAND_MODE
+                        key == moe.chenxy.fiilpods.config.ConfigManager.PREF_KEY_ISLAND_MODE ||
+                        // 「伪装耳机型号」也走同一个 prefs：用户改完型号必须立刻能生效，
+                        // 否则 SettingsHook/MiLinkServiceHook 会一直用进程启动时读到的旧型号，
+                        // 表现为「改完没反应，重启手机才行」。
+                        key == moe.chenxy.fiilpods.config.ConfigManager.PREF_KEY_FAKE_DEVICE_ID
                     ) {
                         runCatching { moe.chenxy.fiilpods.config.ConfigManager.refreshFromPrefs(sp) }
                     }
@@ -85,6 +89,21 @@ abstract class HookContext(
         }
         return this
     }
+
+    /**
+     * 收到 `ACTION_CONFIG_CHANGED` 广播时强制重读一次远端偏好。
+     *
+     * [attach] 里注册的 `OnSharedPreferenceChangeListener` 是主通道，但 LSPosed 的
+     * 远端 SharedPreferences 在部分版本上只在**同一进程内**写才回调监听器；
+     * 模块 App 跨进程改配置时监听器可能不触发，表现为「设置改了要重启进程才生效」。
+     * 所以凡是已经挂了 `ACTION_CONFIG_CHANGED` 接收器的 Hook，都在那个分支里再补一次。
+     */
+    protected fun refreshConfigFromPrefs() {
+        if (!::prefs.isInitialized) return
+        runCatching { moe.chenxy.fiilpods.config.ConfigManager.refreshFromPrefs(prefs) }
+            .onFailure { logW("refreshConfigFromPrefs failed", it) }
+    }
+
     // ---------------- 反射工具 ----------------
 
     fun findClass(name: String): Class<*> = Class.forName(name, false, classLoader)

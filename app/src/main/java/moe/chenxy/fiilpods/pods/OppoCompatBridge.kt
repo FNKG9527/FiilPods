@@ -150,8 +150,26 @@ object OppoCompatBridge {
         }
     }
 
-    private fun publishConnection(ctx: Context, s: FiilStatus, force: Boolean) {
-        if (force || lastConnected != s.connected) {
+    /**
+     * 广播「链路反复失败、已停止自动重连」。
+     *
+     * 与 [publishSwitching] 的 `"connecting"` 相对应，这里发 `"error"`。
+     * 存在的意义：v2.1.0 基线在两个自激回路里只会反复发 CONNECTED / DISCONNECTED，
+     * UI 状态栏于是无休止地跳变，用户既不知道发生了什么，也没有办法停下来。
+     * 现在刹车生效（见 `FiilRfcommController.noteDisconnectHealth`）之后，
+     * 需要一个**明确的终态**告诉 UI「别再等自动重连了，请手动处理」——
+     * MainUI 侧收到 `state="error"` 会弹「连接失败」并回到设备选择页。
+     */
+    fun publishLinkFailed(ctx: Context) {
+        if (lastState == "error") return
+        lastState = "error"
+        lastConnected = false
+        send(ctx, OppoPodsAction.ACTION_PODS_CONNECTION_STATE_CHANGED) {
+            putExtra("state", "error")
+        }
+    }
+
+    private fun publishConnection(ctx: Context, s: FiilStatus, force: Boolean) {        if (force || lastConnected != s.connected) {
             lastConnected = s.connected
             if (s.connected) {
                 send(ctx, OppoPodsAction.ACTION_PODS_CONNECTED) {
