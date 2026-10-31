@@ -392,6 +392,28 @@ object FiilRfcommController {
         private set
 
     /**
+     * 耳机侧 LDAC 开关的真实状态（cid=39 cmdId=143 回包 payload[0]==1）。
+     *
+     * ⚠ 与 [moe.chenxy.fiilpods.pods.FiilCodec] 的 A2DP 视角**不是一回事**：
+     * `FiilCodec` 看的是手机当前协商到哪个编码器（结果，有 1.5~3 秒滞后），
+     * 这里看的是耳机自己的开关位（原因）。耳机不开，A2DP 根本不会声明 LDAC，
+     * 所以只看 `FiilCodec` 会得到「不支持 → 不显示开关 → 永远打不开」的死锁。
+     */
+    @Volatile
+    var ldacEnabled: Boolean = false
+        private set
+
+    /** 耳机侧 LDAC 是否已解锁/授权（cid=39 cmdId=142 回包 payload[0]==1）。 */
+    @Volatile
+    var ldacUnlocked: Boolean = false
+        private set
+
+    /** 是否收到过 LDAC 状态回包。没收到过时 UI 显示「--」而不是「关」。 */
+    @Volatile
+    var ldacKnown: Boolean = false
+        private set
+
+    /**
      * 是否在期待「畅连切换导致的断链」。
      *
      * 畅连开关下发后，耳机**一定会**踢掉链路（固件在换主从角色，不是故障）。
@@ -1373,6 +1395,31 @@ object FiilRfcommController {
                     }
                 }
                 FiilMate.Query.VERSION -> Log.i(TAG, "mate fw version len=${frame.payload.size}")
+                // ---- LDAC 耳机侧状态（cid=39）----
+                //
+                // 读开关：`c.java:107 getLdacSwitchStatus` → cid=39 cmdId=143，
+                //   回包 payload[0]==1 表示**耳机侧 LDAC 已开启**。
+                // 读解锁：`c.java:123 getLdacUnlockStatus` → cid=39 cmdId=142，
+                //   回包 payload[0]==1 表示**已授权/已解锁**。
+                //
+                // 这两条决定了 UI 上 LDAC 开关的**显示与初值**：
+                //  · 143 有回包 → ldacKnown=true，开关显示真实状态；
+                //  · 143 无回包但机型在 LDAC_EAR_TYPES 里 → 开关仍显示（默认关），
+                //    否则用户永远没有入口去打开它。
+                FiilMate.Query.LDAC_SWITCH -> {
+                    if (frame.payload.isNotEmpty()) {
+                        ldacEnabled = frame.byteAt(0, 0) == 1
+                        ldacKnown = true
+                        ackOp(KEY_LDAC)
+                        publishState()
+                    }
+                }
+                FiilMate.Query.LDAC_UNLOCK -> {
+                    if (frame.payload.isNotEmpty()) {
+                        ldacUnlocked = frame.byteAt(0, 0) == 1
+                        publishState()
+                    }
+                }
                 // 佩戴检测状态：`00 27 01 00 01 09 <0/1>` —— g.java:267 getWear()
                 // 回包 payload[0]==1 表示已开启。仅 F051/F053 有这条查询。
                 // 注意与 NOTIFY cmd=9（佩戴**状态**：摘下/戴上）是两回事：
@@ -1483,6 +1530,19 @@ object FiilRfcommController {
                 }
             }
             FiilMate.Param.TUNING -> applyAdaptiveEcho(AdaptiveKind.TUNING)
+            // LDAC 开关（cid=1 cmdId=13）。回显同样不带新值，取发送时记下的目标。
+            FiilMate.Param.LDAC_SWITCH -> {
+                val target = pendingTargets.remove(KEY_LDAC)
+                if (target != null) {
+                    ldacEnabled = target
+                    ldacKnown = true
+                    ackOp(KEY_LDAC)
+                    publishState()
+                    // 耳机侧开关变了之后 A2DP 会重新协商编码器，但系统回调有 1.5~3 秒延迟
+                    // （见 FiilCodec 的注释）。立刻补发一次读数，让 UI 不用等这么久。
+                    runCatching { FIILProtocol.requestLdacState() }
+                }
+            }
             FiilMate.Param.EQ_ADAPTIVE -> applyAdaptiveEcho(AdaptiveKind.EQ)
             FiilMate.Param.EAR_ADAPTIVE -> applyAdaptiveEcho(AdaptiveKind.EAR)
             FiilMate.Param.NOISE_ADAPTIVE -> applyAdaptiveEcho(AdaptiveKind.NOISE)
@@ -2098,6 +2158,9 @@ object FiilRfcommController {
         tuning = tuning,
         earTypeOverridden = earTypeOverridden,
         toneVolume = toneVolume,
+        ldacEnabled = ldacEnabled,
+        ldacUnlocked = ldacUnlocked,
+        ldacKnown = ldacKnown,
     )
 
     /** 上一次广播出去的连接/电量/ANC，用来做变化检测，避免刷屏。 */
@@ -2176,6 +2239,7 @@ object FiilRfcommController {
     private const val KEY_CINEMA = "cinema"
     private const val KEY_MULTIPOINT = "multipoint"
     private const val KEY_TONE = "tone"
+    private const val KEY_LDAC = "ldac"
     private const val KEY_WEAR = "wear"
     private const val KEY_TUNING = "tuning"
     private const val KEY_EQ_ADAPTIVE = "eq_adaptive"

@@ -65,6 +65,19 @@ object OppoPodsAction {
     const val EXTRA_LDAC_SUPPORTED = "ldac_supported"
     const val EXTRA_LDAC_KNOWN = "ldac_known"
 
+    // ---- 耳机侧 LDAC（v2.2.2 新增）----
+    // 上面三个 `ldac_*` 与下面三个 `headset_ldac_*` 是**两条独立来源**，接收端要分开读：
+    //  · `ldac_*`         = 手机侧 A2DP 视角（FiilCodec 反射 A2dpService.getCodecStatus()），
+    //                       回答「这条链路当前协商成了哪个编码器」。
+    //  · `headset_ldac_*` = 耳机侧视角（RFCOMM cid=39 cmdId=143 开关 / 142 解锁），
+    //                       回答「耳机自己开没开 LDAC」。
+    // 耳机没开 LDAC 时，A2DP 握手根本不会声明 LDAC 能力，`ldac_*` 永远是
+    // known=false —— 这正是用户报「控制页找不到 LDAC 开关」的根因：判定「该不该
+    // 显示开关」用错了来源。现在显示与否由机型能力 + 耳机侧状态决定。
+    const val EXTRA_HEADSET_LDAC_ENABLED = "headset_ldac_enabled"
+    const val EXTRA_HEADSET_LDAC_UNLOCKED = "headset_ldac_unlocked"
+    const val EXTRA_HEADSET_LDAC_KNOWN = "headset_ldac_known"
+
     // 蓝牙进程 → 模块 App：请求把用户带到系统「蓝牙音频编解码器」页。
     //
     // 为什么必须绕这一圈：`com.android.bluetooth` 是后台进程，Android 10+

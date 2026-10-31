@@ -531,7 +531,70 @@ object FIILProtocol {
         FiilRfcommController.setAdaptiveSwitch(kind, on)
     }
 
-    /** 一次性刷新全部状态（UI 下拉刷新 / 连接后补数据）。
+    /**
+     * 查询耳机侧 LDAC 状态（两条 cid=39 查询）。
+     *
+     * - cmdId=143 `getLdacSwitchStatus` → 开关开没开
+     * - cmdId=142 `getLdacUnlockStatus` → 有没有解锁/授权
+     *
+     * 逆向依据：`com.fengeek.main.i.d.c.java:107` / `:123`，两条都是
+     * `setCommandClassifyId(39)` + `setCommandId(NetError...)`，
+     * NetError 常量换算成无符号字节分别是 143 / 142。
+     *
+     * 只有 [FiilModels.supportsLdac] 的机型发，其余机型发了也不回
+     * （会多出两条超时日志，没必要）。
+     */
+    fun requestLdacState() {
+        if (!FiilRfcommController.isMateDialect) return
+        if (!FiilModels.supportsLdac(FiilRfcommController.earType)) return
+        FiilRfcommController.sendMate(FiilMate.Cid.QUERY, FiilMate.Query.LDAC_SWITCH)
+        FiilRfcommController.sendMate(FiilMate.Cid.QUERY, FiilMate.Query.LDAC_UNLOCK)
+    }
+
+    /**
+     * 开关耳机侧 LDAC。
+     *
+     * ⚠ 写命令与读命令的 cmdId **不对称**（这是逆向里最容易踩的坑）：
+     *  · 读开关 = cid 39 + cmdId **143**
+     *  · 写开关 = cid **1** + cmdId **13**（`c.java:371 setLdacSwitch(boolean)`）
+     * 帧：`00 01 01 00 03 0D 01 [0/1]`，回显 `00 01 02 00 01 0D 00`（末字节 0 = 成功）。
+     *
+     * 官方 App 的做法（`F046HomeFragment.java:390-405`）有一条**额外前置**：
+     * 打开 LDAC 前先关低延迟（`setLowDelay(false)`），因为两者抢带宽。
+     * 这里照做 —— 顺序反了的话耳机可能回 ACK 但实际没切过去。
+     *
+     * 切完之后 A2DP 会重新协商编码器，`FiilCodec` 那边约 1.5~3 秒才看得到变化，
+     * 所以这里只是「下发耳机侧开关」，手机侧是否真的跑在 LDAC 由 A2DP 自己决定。
+     */
+    fun setLdacSwitch(on: Boolean) {
+        if (!FiilRfcommController.isMateDialect) {
+            Log.i(TAG, "setLdacSwitch($on) skipped: 非 Mate 链路")
+            return
+        }
+        if (!FiilModels.supportsLdac(FiilRfcommController.earType)) {
+            Log.i(TAG, "setLdacSwitch($on) skipped: earType=${FiilRfcommController.earType} 不在 LDAC 支持列表")
+            return
+        }
+        // 官方顺序：开 LDAC 前先关低延迟（F046HomeFragment.java:390-405）。
+        // 关 LDAC 时不需要动低延迟 —— 用户可能就在用低延迟。
+        if (on && FiilRfcommController.lowLatencyLevel != 0) {
+            Log.i(TAG, "setLdacSwitch(true): 先关低延迟（官方顺序）")
+            setLowLatencyMode(LowLatencyMode.MUSIC)
+        }
+        FiilRfcommController.expectAckPublicIfChanged("ldac", "LDAC 开关", if (on) 1 else 0) {
+            if (FiilRfcommController.ldacEnabled) 1 else 0
+        }
+        // cid=1 的 SET 回显不带新值，把目标记下来，回显到达时直接用。
+        FiilRfcommController.rememberPendingTarget("ldac", on)
+        FiilRfcommController.sendMate(
+            FiilMate.Cid.SET_PARAM,
+            FiilMate.Param.LDAC_SWITCH,
+            byteArrayOf(if (on) 1 else 0),
+        )
+    }
+
+    /**
+     * 一次性刷新全部状态（UI 下拉刷新 / 连接后补数据）。
      *
      * 顺序与 [handshake] 一致，但不做机型判断以外的副作用，
      * 可以在任意时刻重复调用。
@@ -547,6 +610,8 @@ object FIILProtocol {
             requestMultipoint()
             requestWearState()
             readEQ()
+            // LDAC 耳机侧状态（cid=39 的 143/142）——按机型门控。
+            requestLdacState()
         } else {
             requestEarType()
             requestBattery()
@@ -652,6 +717,8 @@ object FIILProtocol {
         readEQ()
         // 自适应开关（cid=39 的 135/137/138/139/140）——按机型各发各的。
         requestAdaptiveSwitches()
+        // LDAC 耳机侧状态（cid=39 的 143/142）——按机型门控，不支持的机型直接跳过。
+        requestLdacState()
     }
 }
 

@@ -41,12 +41,19 @@ internal fun EarphonesTabPage(
     toneVolume: Int = -1,
     lowLatencyMode: Int = -1,
     /**
-     * LDAC 三态：`-1` 未知/不支持（不渲染开关）、`0` 支持但当前未启用、`1` 已启用。
+     * LDAC 开关状态：`-1` 还没读到（开关仍显示，初值当关）、`0` 关、`1` 开。
      *
-     * 为什么用 Int 而不是 Boolean：本 ROM 反射不到 `A2dpService` 时要能把开关整个藏掉，
-     * 给个恒为 false 的 Boolean 就变成「假开关」了。
+     * ⚠ v2.2.2 起语义变了：以前 `-1` 表示「不支持 → 整块不渲染」，但那是个自锁
+     * （LDAC 是耳机侧开关，耳机不开 → A2DP 不声明能力 → 永远读不到 → 开关永不显示）。
+     * 现在「显示与否」由 [ldacSupported] 决定，这个值只决定初值。
      */
     ldacState: Int = -1,
+    /** 该机型是否支持耳机侧 LDAC 开关（决定详情页显不显示这一项）。 */
+    ldacSupported: Boolean = false,
+    /** 是否收到过耳机侧 LDAC 状态回包。 */
+    ldacKnown: Boolean = false,
+    /** 耳机侧 LDAC 是否已解锁授权。 */
+    ldacUnlocked: Boolean = false,
     onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
@@ -105,6 +112,9 @@ internal fun EarphonesTabPage(
                 toneVolume = toneVolume,
                 lowLatencyMode = lowLatencyMode,
                 ldacState = ldacState,
+                ldacSupported = ldacSupported,
+                ldacKnown = ldacKnown,
+                ldacUnlocked = ldacUnlocked,
                 onLdacChange = onLdacChange,
                 onToneVolumeChange = onToneVolumeChange,
                 onLowLatencyModeChange = onLowLatencyModeChange,

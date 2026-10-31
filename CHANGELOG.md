@@ -7,6 +7,66 @@
 
 ---
 
+## [2.2.2] - 2026-10-31
+
+修「耳机详情页根本看不到 LDAC 开关」。**这不是 UI 遗漏，是一个自锁**：
+LDAC 是耳机侧开关，而旧实现只查手机侧 A2DP 能力 —— 耳机不开就不显示开关，
+不显示用户就没入口打开，于是永远不开。
+
+### Fixed
+
+- **详情页看不到 LDAC 开关**（用户第三次反馈）
+  `PodDetailPage` 原来的渲染条件是 `if (ldacState >= 0)`，而 `ldacState` 只在
+  `FiilCodec.query()` 返回 `supported=true` 时才会变成 0/1。`supported` 来自
+  `A2dpService.getCodecStatus(device)` 里有没有 LDAC 那一项 —— 而 **FIIL 的 LDAC 是耳机侧开关**
+  （官方 App 逆向：写 `cid=1 cmdId=13`、读开关 `cid=39 cmdId=143`、读解锁 `cid=39 cmdId=142`），
+  耳机自己不开时 A2DP 握手根本不声明该编码器。于是：耳机不开 → A2DP 不声明 →
+  `supported=false` → `ldacState` 恒为 -1 → 开关不渲染 → 没有入口打开 → 耳机永远不开。
+
+  `git grep` 证实：`LDAC_SWITCH` / `LDAC_UNLOCK` 在 2.2.1 只命中 `FiilMate.kt` 的常量定义，
+  **全项目零发送点** —— 这条命令一次都没发出去过。
+
+  修法六点：
+  1. `FiilModels.supportsLdac(earType)` 新增机型白名单 `{39, 46, 48, 49, 51, 53}`
+     （依据官方 App 里所有 `setLdacSwitch(` 调用点）。
+  2. 渲染条件从 `if (ldacState >= 0)` 改为 `if (ldacSupported)`，与协议层解耦。
+  3. 状态改读耳机侧：`FiilMate.Param.LDAC_SWITCH = 13` / `LDAC_ACTIVATE = 12`（写），
+     `FiilRfcommController` 新增 `ldacEnabled` / `ldacUnlocked` / `ldacKnown` 三个
+     `@Volatile` 字段与两条 `Cid.QUERY` 回包分支、一条 `applySetParam` 回显分支
+     （`cid=1` 回显不带新值，用 `rememberPendingTarget("ldac", on)` 记目标值）。
+  4. 广播分两条来源：`ldac_*`（手机 A2DP 视角）与 `headset_ldac_*`（耳机侧视角），
+     避免后到的覆盖先到的。
+  5. 点击时双管齐下：先 `FIILProtocol.setLdacSwitch(want)` 让耳机开，再
+     `FiilCodec.setLdac(...)` 改手机侧编码器偏好。**顺序不能反** ——
+     耳机还不支持时 `setCodecConfigPreference` 会被系统拒掉。
+     官方顺序照抄：开 LDAC 前先关低延迟（两者抢带宽）。
+  6. `ACTION_PODS_UI_INIT` 心跳里补 `FIILProtocol.requestLdacState()`，
+     保证第一次进详情页就能拿到耳机侧状态。
+
+  `ldacState` 语义随之改变：以前 `-1` 表示「不支持、整块不渲染」，
+  现在只表示「还没读到、开关仍显示、初值当关」。
+
+### Added
+
+- 详情页 LDAC 摘要三态提示：「需先在 FIIL+ 官方 App 里解锁高清音频」（`ldacUnlocked=false`）/
+  「正在读取耳机状态…」（`ldacKnown=false`）/ 真值。未解锁时**开关不置灰**，
+  允许用户直接点（可能已在官方 App 解锁但回包还没到）。
+
+### Changed
+
+- `versionCode` 5 → 6，`versionName` 2.2.1 → 2.2.2
+- 应用名保持 `FiilPods 2.2 Fix` 不变
+- 文档 `docs/RELEASE_v2.2.1.md` → `docs/RELEASE_v2.2.2.md`，新增第十六节（LDAC 自锁的
+  逆向取证与六点修法），回归清单从 50 条扩到 57 条（51-57 专验 LDAC）
+
+### Known
+
+- Android 17 上 `A2dpService.sA2dpService` 静态字段已不存在（`FiilCodec` 的路线 2 失效），
+  只剩 `AdapterService.sAdapterService` + `getA2dpService()` 的路线 1 可用。
+  本轮复核确认路线 1 可用，未改代码。
+
+---
+
 ## [2.2.1] - 2026-10-31
 
 删除从 OppoPods 复制过来的「OPPO LE Audio」设置页。**仅此一项改动，不含功能修复。**

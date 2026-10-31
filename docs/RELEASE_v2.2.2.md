@@ -1,32 +1,34 @@
-# FiilPods v2.2.1 发布说明
+# FiilPods v2.2.2 发布说明
 
 > 基线：`2aa474f` (v2.1.0) + `d4eb3cf`（README）。
-> 本版做八件事：修用户提出的 5 个实机 Bug、保证「伪装耳机型号」端到端可用、
+> 本版做九件事：修用户提出的 5 个实机 Bug、保证「伪装耳机型号」端到端可用、
 > 修掉「连接/断开反复来回跳」的自激回路（第九节）、
 > 从 FIIL+ 逆向资源里取全套耳机产品图，主页按连接型号显示对应图标（第十节）、
 > 修掉融合中心切模式后图标仍卡在旧值的问题（第十一节：通知投递时机）、
 > 针对 MiLink 18.2 的「策略模式」重构补齐 ProfileContext 层 hook（第十二节）、
 > 修掉切模式时图标「闪一下旧值再闪回来」的问题（第十三节：待确认窗口）、
 > 重修 Bug 2 焦点通知 —— 旧的两条 hook 路径在 HyperOS 4 上全部失效（第十四节）、
-> 并**删掉 OPPO 的 LE Audio 设置页**（第十五节：只有 UI 壳、零 hook 实现）。
+> **删掉 OPPO 的 LE Audio 设置页**（第十五节：只有 UI 壳、零 hook 实现）、
+> 并**修掉「详情页根本看不到 LDAC 开关」**（第十六节：耳机侧开关从未被发送）。
 > 不重写架构。断连回路用的是「记账 + 闸门 + 递增冷却」的最小刹车，
 > **不是** 2.2.0 那一套被否掉的熔断器（见 9.5 与 9.8）。
 
 | 项 | 值 |
 | --- | --- |
 | 应用名 | `FiilPods 2.2 Fix`（`res/values/strings.xml:2`、`res/values-zh-rCN/strings.xml:3`） |
-| versionCode / versionName | 5 / `2.2.1`（`app/build.gradle.kts:30-31`） |
-| 改动面 | 25 files changed, +2144 / −655（另有 4 个新增源文件、31 个新增图片资源、3 个删除的源文件） |
+| versionCode / versionName | 6 / `2.2.2`（`app/build.gradle.kts:30-31` 起） |
+| 改动面 | 25 files changed, +2144 / −655（另有 4 个新增源文件、31 个新增图片资源、3 个删除的源文件）+ 本轮 LDAC 修复（8 files changed, +233 / −45） |
 | 新增文件 | `pods/FiilCodec.kt`（422 行）、`pods/PodImages.kt`（105 行）、`utils/NotifPermission.kt`（75 行）、`app/src/test/java/moe/chenxy/fiilpods/pods/PodImagesTest.kt`（108 行） |
 | 删除文件 | `config/LeAudioConfig.kt`、`ui/pages/LeAudioSettingsPage.kt`、`ui/dialogs/LeAudioDevicesDialog.kt`（共 −362 行，见第十五节） |
 | 新增资源 | `res/drawable-nodpi/` 下 31 个 webp（30 张官方产品图 + `fiil_unknow` 兜底），合计 498,288 B |
 | 删除资源 | `strings.xml` / `values-zh-rCN/strings.xml` 各 42 条 `le_audio_*` 字符串（共 84 条） |
-| 构建 | `clean` + `testDebugUnitTest` + `assembleDebug` + `assembleRelease` → BUILD SUCCESSFUL in 4m 33s, EXIT=0 |
+| 构建 | `clean` + `testDebugUnitTest` + `assembleDebug` + `assembleRelease` → BUILD SUCCESSFUL in 3m 58s, EXIT=0 |
 | 单测 | suites=4, tests=57, failures=0, errors=0, skipped=0 |
-| 产物 | `dist/FiilPods-v2.2.1-debug.apk`(35,670,731 B)、`dist/FiilPods-v2.2.1-release.apk`(4,543,336 B) |
-| release SHA256 | `BA45F8140C37CC4406BAC0D713F619B28B58AF2E35AA12C7B4533E77FE6D2FAF` |
-| debug SHA256 | `D7EF9DFF19E3AA77EA1A7C779B5BF8326E2DF2FA1DE6E7F721E605455CEEC3E1` |
-| 上一版（v2.2.0）release SHA256 | `BA6E4FDB75A4111F816498D053E45C09A2FC322ECC08835E6A0560952EC5477D` |
+| 产物 | `dist/FiilPods-v2.2.2-debug.apk`(35,687,120 B)、`dist/FiilPods-v2.2.2-release.apk`(4,543,340 B) |
+| release SHA256 | `897726447F172F307AC8F518314BA778CCFE12CFB646D3D3D806603421C3C24C` |
+| debug SHA256 | `4C8C33073650AF4EDCD354DD4823389C4E504C76C2F5C9BAB8E9814190CD3324` |
+| 上一版（v2.2.1）release SHA256 | `BA45F8140C37CC4406BAC0D713F619B28B58AF2E35AA12C7B4533E77FE6D2FAF` |
+| 再上一版（v2.2.0）release SHA256 | `BA6E4FDB75A4111F816498D053E45C09A2FC322ECC08835E6A0560952EC5477D` |
 
 > 构建方式说明：**必须用 `clean` 后重建的产物交付**。此前增量构建出的 release 包
 > 虽然源码 mtime 全部早于 APK、内容一致，但 SHA256 与 clean 重建结果不同
@@ -1762,7 +1764,7 @@ cls.declaredConstructors.forEach { ctor ->
 
 LSPosed 的 hook 只在**进程启动时**注入。装完新 APK 后如果不停进程，
 `com.xiaomi.bluetooth` 里跑的仍是旧 hook（旧 hook 里压根没有 `Application.attach`），
-看起来会「和没修一样」。所以验证前必须按第十六节第 41 条关开蓝牙
+看起来会「和没修一样」。所以验证前必须按第十七节第 41 条关开蓝牙
 （或重启手机），让两个进程重新拉起。
 
 ### 14.8 排查指引（若仍不出现通知卡片）
@@ -1884,7 +1886,166 @@ FIIL 侧也没有任何关联：`pods/` 协议层搜 `LC3|LE Audio|BleAudio|LE_A
 > **必须传绝对路径**。.NET API 按进程工作目录解析相对路径，不认 PowerShell 的 `cd`，
 > 会报 `Could not find a part of the path 'D:\DeepSeek\dist\...'`。
 
-## 十六、回归验证清单
+## 十六、LDAC 开关仍然看不到：耳机侧开关从未被发送（2.2.2 新增）
+
+第一~八节把 LDAC 那条链路修到了「手机侧 A2DP 反射能通」。但用户装 2.2.1 后仍是同一句话：
+**「在软件里面没有发现 LDAC 开关」**。原因是前面几轮修的层次不对。
+
+### 16.1 现象与直接原因
+
+`ui/pages/PodDetailPage.kt` 里开关的渲染条件原本是：
+
+```kotlin
+if (ldacState >= 0) { SwitchPreference(title = LDAC_TITLE, ...) }
+```
+
+`ldacState` 只在收到 `ACTION_PODS_LDAC_CHANGED` 且 `known && supported` 时才变成 0/1，
+其余一律停在初值 `-1` → **整块不渲染**。所以「看不到开关」= `ldacState` 恒为 `-1`。
+
+### 16.2 根因：这是一个自锁，修在错的那一层永远解不开
+
+`FiilCodec.query()` 的 `supported` 完全来自手机侧反射：
+
+```kotlin
+val status = a2dpService.getCodecStatus(device)      // 手机 A2DP 协商结果
+val ldacCandidate = status.codecs.firstOrNull { it.codecType == CODEC_TYPE_LDAC /* 4 */ }
+CodecState(supported = ldacCandidate != null, enabled = currentCodecType == 4)
+```
+
+而 **FIIL 的 LDAC 是耳机侧开关**（官方 App 逆向：`c.java:371 setLdacSwitch` → cid=1 cmdId=13 写；
+`c.java:107 getLdacSwitchStatus` → cid=39 cmdId=143 读；`c.java:123 getLdacUnlockStatus` → cid=39 cmdId=142）。
+耳机自己不开 LDAC 时，A2DP 握手**根本不会把 LDAC 列进 codecs**，于是：
+
+```
+耳机不开 → A2DP 不声明 LDAC → ldacCandidate == null → supported == false
+        → ldacState 保持 -1 → 开关不渲染 → 用户没有入口去打开它 → 耳机永远不开
+```
+
+**这个环里没有外力能打破它。** 2.2.0/2.2.1 只做了「手机侧改编码器偏好」，
+而耳机端从来没有人发过 `cid=1 cmdId=13` —— 命令一次都没发出去过
+（`git grep -n "LDAC_SWITCH\|LDAC_UNLOCK"` 在 2.2.1 只命中 `FiilMate.kt` 的**常量定义**，
+全项目零发送点）。
+
+### 16.3 顺带查出的另一处缺陷：`sA2dpService` 在 Android 17 上不存在
+
+`FiilCodec.a2dpServiceOrNull()` 有两条路线，第 2 条读
+`com.android.bluetooth.a2dp.A2dpService.sA2dpService` 静态字段。在 Android 15 上这确实是
+`FiilCodec.kt` 踩过的坑，所以本轮顺手复查 —— 结论：
+
+| 项 | Android 15（旧机） | Android 17（`25102RKBEC`） |
+| --- | --- | --- |
+| `A2dpService.sA2dpService` | 存在 | **不存在**（`aapt2` 解出的 smali 全文零命中） |
+| `AdapterService.sAdapterService` | 存在 | 存在（`:183`） |
+| `AdapterService.getA2dpService(): Optional` | 存在 | 存在（`:11086`，`const/4 v0, 0x2` + `getStartedProfile(2, A2dpService.class)`） |
+
+所以路线 1 是唯一可用路径，路线 2 在新系统上必然返回 null。这个不必改 ——
+路线 1 已经能用（`CLASS_LOADER` 修好之后），但它解释了为什么某些 ROM 上「反射全通、
+拿到的还是 null」。`A2dpService` 的四个方法签名在 Android 17 上都在：
+`getCodecStatus(BluetoothDevice)`、`setCodecConfigPreference(BluetoothDevice, BluetoothCodecConfig)`、
+`setUserCodecStatus(BluetoothDevice, int, int)`、`setUserCodecStatus(BluetoothDevice, String, int)`。
+
+### 16.4 修法：把「显示与否」从协议层移到能力层
+
+只要「该不该显示」还需要先问协议层，这个环就解不开，所以第一步是把判定依据换掉。
+
+**① `pods/FiilModels.kt` 新增能力集** —— 依据是官方 App 里所有 `setLdacSwitch(` 的调用点
+（只有 `F046HomeFragment` / `F048/49/51/53` 与 `ele_cc_pro2_fragment` 会调）：
+
+```kotlin
+private val LDAC_EAR_TYPES: Set<Int> = setOf(39, 46, 48, 49, 51, 53)
+fun supportsLdac(earType: Int): Boolean = earType in LDAC_EAR_TYPES
+```
+
+**② 渲染条件改成能力判定**（`PodDetailPage.kt`）：
+
+```kotlin
+if (ldacSupported) { ... }        // 原来是 if (ldacState >= 0)
+```
+
+`ldacSupported` 由 `MainUI` 用 `FiilModels.supportsLdac(connectedEarType)` 算出来，
+一路透传 `MainTabs → EarphonesTabShell → EarphonesTabPage → PodDetailPage`。
+这样**只要机型支持，开关就一定出现**，与耳机当前开没开、A2DP 有没有声明彻底解耦。
+
+**③ 状态改读耳机侧**（`pods/FiilMate.kt` + `FiilRfcommController.kt` + `FIILProtocol.kt`）：
+
+- `FiilMate.Param` 新增 `LDAC_SWITCH = 13`、`LDAC_ACTIVATE = 12`（写）；读沿用既有的
+  `Query.LDAC_SWITCH = 143`、`Query.LDAC_UNLOCK = 142`。**读写 cmdId 不对称**，这是逆向里最容易踩的坑。
+- `FiilRfcommController` 新增三个 `@Volatile` 状态 `ldacEnabled` / `ldacUnlocked` / `ldacKnown`；
+  `dispatchMate` 的 `Cid.QUERY` 增加 `LDAC_SWITCH` / `LDAC_UNLOCK` 两个回包分支；
+  `applySetParam` 增加 `Param.LDAC_SWITCH` 回显分支（`cid=1` 的 SET 回显不带新值，
+  所以先用 `rememberPendingTarget("ldac", on)` 记下目标值，回显到了直接采用）；
+  `snapshot()` 与 `FiilStatus` 同步新增三个字段（`toJson` / `fromJson` 都要加）。
+- `FIILProtocol.requestLdacState()` 发两条查询；`FIILProtocol.setLdacSwitch(on)` 写一条。
+  官方顺序照抄：**开 LDAC 前先关低延迟**（`F046HomeFragment.java:390-405`），
+  两者抢带宽，顺序反了耳机可能回 ACK 但没真切。
+
+**④ 广播分两条来源**（`pods/OppoCompatBridge.kt` + `OppoPodsAction.kt`）：
+
+`ACTION_PODS_LDAC_CHANGED` 现在有**两条独立来源**，extra 前缀必须分开，否则后到的覆盖先到的：
+
+| 来源 | extra 前缀 | 含义 |
+| --- | --- | --- |
+| `FiilCodec.publishState` | `ldac_*` | 手机侧 A2DP 视角：这条链路当前协商成了什么编码器 |
+| `OppoCompatBridge.publishHeadsetLdac` | `headset_ldac_*` | 耳机侧视角：耳机自己开没开、是否已解锁 |
+
+`MainUI` 收到时先看有没有 `headset_ldac_known`，有就按耳机侧走，没有才回落到 A2DP 视角。
+
+**⑤ 点击双管齐下**（`hook/BluetoothProcessHook.kt` 的 `ACTION_LDAC_SET` 分支）：
+
+```kotlin
+FIILProtocol.setLdacSwitch(want)      // ① 先让耳机开（真开关）
+val ok = FiilCodec.setLdac(device, want, classLoader)   // ② 再把手机侧编码器偏好改成 LDAC
+```
+
+顺序不能反：手机侧先改时耳机还不支持，`setCodecConfigPreference` 会被系统拒掉。
+
+**⑥ UI_INIT 心跳里补一次查询**：`FIILProtocol.requestLdacState()` 跟着 `FiilCodec.publishState()`
+一起发，保证用户第一次进详情页就能拿到耳机侧状态。
+
+### 16.5 状态语义（用户可见）
+
+| 条件 | 摘要文案 | 开关 |
+| --- | --- | --- |
+| 机型不支持（`ldacSupported == false`） | 整项不渲染 | — |
+| `ldacUnlocked == false` | 「需先在 FIIL+ 官方 App 里解锁高清音频」 | 显示，可点 |
+| `ldacKnown == false` | 「正在读取耳机状态…」 | 显示，可点 |
+| 已知 | 「已启用」/「启用高解析蓝牙音频（需耳机与手机同时支持）」 | 显示，跟随真值 |
+
+> 未解锁时**仍然让开关可点**：用户可能已经在官方 App 里解锁但 142 回包还没到，
+> 置灰会让人以为坏了。点下去走正常流程，`setLdacSwitch` 会如实下发。
+
+### 16.6 核验结果
+
+| 项 | 结果 |
+| --- | --- |
+| `:app:compileDebugKotlin` | BUILD SUCCESSFUL in 53s, EXIT=0（唯一警告 `getDefaultAdapter()` deprecated，既有） |
+| `clean` + 单测 + 两个 APK | BUILD SUCCESSFUL in 4m 17s, EXIT=0 |
+| 单测 | suites=4, tests=57, failures=0, errors=0, skipped=0 |
+| `aapt2 dump badging` | `versionCode='6' versionName='2.2.2'`、`application-label:'FiilPods 2.2 Fix'` |
+| 源码滞后检查 | `source files newer than apk: 0` |
+| 新增特征串（13 条） | `ldac headset-side -> want=`、`ldac query skipped`、`setLdacSwitch`、`requestLdacState`、`supportsLdac`、`headset_ldac_known`、`headset_ldac_enabled`、`headset_ldac_unlocked`、`publishHeadsetLdac`、`LDAC_SWITCH`、`LDAC_UNLOCK`、`expectAckPublicIfChanged`、`rememberPendingTarget` —— **全部 True** |
+| 新增中文字串（2 条） | `需先在 FIIL+ 官方 App 里解锁高清音频`、`正在读取耳机状态` —— 全部 True |
+| 回归串（10 条） | `candidateClassLoaders`、`getSYSTEM_BROADCAST_HANDLER`、`Application.attach`、`BluetoothHeadsetService.onCreate`、`receiver registered in xiaomi.bluetooth`、`setAncStateBlock`、`hookBooleanStatic`、`notifyAsUser`、`connectUserInitiated`、`giving up auto-reconnect for` —— **全部 True** |
+| 被否的 2.2.0 断连自愈三串 | `connect throttled`、`MAX_SILENT_ATTEMPTS`、`silentAttemptStreak` —— **全部 False** |
+| LeAudio 残留 | `le_audio_title` —— **False**（2.2.1 的删除没被回滚） |
+
+### 16.7 排查指引
+
+装了 2.2.2 仍然看不到开关时，按顺序查：
+
+1. **`versionName` 必须是 `2.2.2`**。低于它说明装的还是老包。
+2. **机型必须在 `LDAC_EAR_TYPES` 里**。用 `adb shell dumpsys bluetooth_manager | grep -i "FIIL\|earType"`，
+   或看详情页顶部的型号名 —— 只有 F039/F046/F048/F049/F051/F053 会出现这一项，
+   其余型号（含 F043 GS、F047 Atom）**本来就没有 LDAC**，不显示是对的。
+3. **开关出现了但点了没反应** → 看 logcat 有没有 `ldac headset-side -> want=`。
+   没有这行说明 `ACTION_LDAC_SET` 没到蓝牙进程（查 `BluetoothProcessHook` 的 receiver 是否注册）。
+4. **有 `ldac headset-side -> want=` 但摘要一直「正在读取耳机状态…」** →
+   耳机侧 143 回包没来。可能是 `isMateDialect` 为 false（非 MATE 链路不支持这套命令），
+   或耳机固件没实现该查询。
+5. **摘要显示「需先在 FIIL+ 官方 App 里解锁高清音频」** → 这台耳机还没解锁 LDAC，
+   先在官方 App 里操作一次，再回来点开关。
+
+## 十七、回归验证清单
 
 1. 耳机控制页能看到 LDAC 开关，开关能真正切 LDAC（`dumpsys bluetooth_manager` 里 codec 变 LDAC）。
 2. 通知栏出现耳机卡片：电量三行、降噪循环按钮、断开按钮、AOD 显示。
@@ -1993,3 +2154,21 @@ FIIL 侧也没有任何关联：`pods/` 协议层搜 `LC3|LE Audio|BleAudio|LE_A
 50. **（2.2.1 新增）** 冒烟：LDAC 开关能出现且能切、通知卡片能出现、融合中心切模式图标跟随、
     主页「当前耳机」卡片显示对应型号图 —— 这四项都**不受本次删除影响**。
     另外「设置」页里其余项（伪装耳机型号、超级岛、焦点通知等）位置与功能应完全不变。
+
+51. **（2.2.2 新增，本轮核心）** 连上 FIIL Key Max（earType=46）→ 进「耳机」详情页 →
+    **LDAC 那一项必须出现**（这是 2.2.0/2.2.1 一直缺的）。
+    判据是机型在白名单里，与耳机当前开没开 LDAC 无关。
+52. **（2.2.2 新增）** 开关出现后，摘要应当是下面三种之一，**不能是空白**：
+    「需先在 FIIL+ 官方 App 里解锁高清音频」/「正在读取耳机状态…」/「已启用」或
+    「启用高解析蓝牙音频（需耳机与手机同时支持）」。
+53. **（2.2.2 新增）** 拨开开关 → logcat 应出现 `ldac headset-side -> want=true`；
+    随后 1.5~3 秒内 `dumpsys bluetooth_manager` 里的 A2DP codec 应从 AAC 变成 **LDAC**。
+    耳机侧状态回包到达后，摘要变成「已启用」。
+54. **（2.2.2 新增）** 拨关开关 → `ldac headset-side -> want=false`，codec 退回 AAC/SBC。
+55. **（2.2.2 新增）** 验证「显示与耳机状态解耦」：先把耳机侧 LDAC 关掉（重启耳机或官方 App 里关），
+    再进详情页 → **开关仍应显示**（摘要「正在读取耳机状态…」或「已关闭」），
+    而不是整项消失。这一条正是 2.2.1 的病根。
+56. **（2.2.2 新增）** 换一个不支持 LDAC 的型号（如 F043 GS / F047 Atom）→ 详情页**不应**出现
+    LDAC 那一项。这是白名单生效的反向验证。
+57. **（2.2.2 新增）** 未解锁的耳机上点开关 → 摘要应显示「需先在 FIIL+ 官方 App 里解锁高清音频」，
+    且**开关不被置灰**（允许点，走正常下发流程）。

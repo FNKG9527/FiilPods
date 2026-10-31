@@ -68,8 +68,14 @@ fun PodDetailPage(
     /** 语音提示音量线值 0=高 1=中 2=低 3=静音，-1 表示还没读到。 */
     toneVolume: Int = -1,
     lowLatencyMode: Int = -1,
-    /** LDAC 开关状态：-1=未知/不支持（不渲染），0=关，1=开。 */
+    /** LDAC 开关状态：-1=未知（开关仍显示，初值当关），0=关，1=开。 */
     ldacState: Int = -1,
+    /** 该机型是否支持耳机侧 LDAC 开关（[moe.chenxy.fiilpods.pods.FiilModels.supportsLdac]）。 */
+    ldacSupported: Boolean = false,
+    /** 是否收到过耳机侧 LDAC 状态回包；没收到过时摘要显示「--」而不是「关」。 */
+    ldacKnown: Boolean = false,
+    /** 耳机侧 LDAC 是否已解锁/授权；未解锁时摘要提示需先用官方 App 解锁。 */
+    ldacUnlocked: Boolean = false,
     onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
@@ -146,6 +152,9 @@ fun PodDetailPage(
                     toneVolume = toneVolume,
                     lowLatencyMode = lowLatencyMode,
                     ldacState = ldacState,
+                    ldacSupported = ldacSupported,
+                    ldacKnown = ldacKnown,
+                    ldacUnlocked = ldacUnlocked,
                     onLdacChange = onLdacChange,
                     onToneVolumeChange = onToneVolumeChange,
                     onLowLatencyModeChange = onLowLatencyModeChange,
@@ -196,6 +205,9 @@ fun PodDetailPage(
             toneVolume = toneVolume,
             lowLatencyMode = lowLatencyMode,
             ldacState = ldacState,
+            ldacSupported = ldacSupported,
+            ldacKnown = ldacKnown,
+            ldacUnlocked = ldacUnlocked,
             onLdacChange = onLdacChange,
             onToneVolumeChange = onToneVolumeChange,
             onLowLatencyModeChange = onLowLatencyModeChange,
@@ -242,8 +254,14 @@ private fun LazyListScope.podControlItems(
     onDualDeviceConnectionChange: (Boolean) -> Unit,
     toneVolume: Int = -1,
     lowLatencyMode: Int = -1,
-    /** LDAC 开关状态：-1=未知/不支持（不渲染），0=关，1=开。 */
+    /** LDAC 开关状态：-1=未知（开关仍显示，初值当关），0=关，1=开。 */
     ldacState: Int = -1,
+    /** 该机型是否支持耳机侧 LDAC 开关（[moe.chenxy.fiilpods.pods.FiilModels.supportsLdac]）。 */
+    ldacSupported: Boolean = false,
+    /** 是否收到过耳机侧 LDAC 状态回包；没收到过时摘要显示「--」而不是「关」。 */
+    ldacKnown: Boolean = false,
+    /** 耳机侧 LDAC 是否已解锁/授权；未解锁时摘要提示需先用官方 App 解锁。 */
+    ldacUnlocked: Boolean = false,
     onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
@@ -369,19 +387,33 @@ private fun LazyListScope.podControlItems(
                     onSelectedIndexChange = { onLowLatencyModeChange(it) }
                 )
             }
-            if (ldacState >= 0) {
-                // LDAC 是真开关：底层走 A2dpService.setCodecConfigPreference(cid 不在耳机侧，
-                // 而是系统蓝牙协议栈)，状态由 CODEC_CONFIG_CHANGED 回读。
-                // ldacState<0 表示本 ROM 无法判定，直接不渲染 —— 宁可没有，也不给假开关。
+            if (ldacSupported) {
+                // LDAC 是**耳机侧开关**（cid=1 cmdId=13 写 / cid=39 cmdId=143 读）。
                 //
-                // ⚠️ 标题/摘要用「字面量拼接」而不是 stringResource(R.string.xxx)：
+                // ⚠ 显示条件从「ldacState >= 0」改成「支持该机型」（v2.2.2 起）：
+                // 旧条件要求「已经从系统 A2DP 读到 LDAC 能力」，可耳机不开 LDAC 就
+                // 不会在 A2DP 握手时声明 support，于是永远读不到 → 开关永远不显示
+                // → 用户永远没有入口打开它。这是个自锁，必须在**能力层**判断。
+                //
+                // 状态语义：
+                //  · ldacKnown=false（还没收到 143 回包）→ 摘要显示「读取中」，开关可点；
+                //  · ldacUnlocked=false（耳机未授权）→ 摘要提示先用官方 App 解锁；
+                //  · 否则按 ldacState 显示开/关。
+                //
+                // ⚠️ 标题/摘要用「字面量常量」而不是 stringResource(R.string.xxx)：
                 // R8 + shrinkResources 会把只被这一处引用的资源当成无用资源删掉（实测
                 // release APK 里 ldac_codec / ldac_summary / ldac_unsupported 三个字符串
                 // 连同资源 ID 一起消失，而 dex 里字段引用还在，运行时就是 Resources$NotFound），
-                // 所以这里改成从源码常量取文本，彻底摆脱对资源 ID 的依赖。
+                // 所以这里从源码常量取文本，彻底摆脱对资源 ID 的依赖。
+                val ldacSummary = when {
+                    !ldacUnlocked -> "需先在 FIIL+ 官方 App 里解锁高清音频"
+                    !ldacKnown -> "正在读取耳机状态…"
+                    ldacState > 0 -> LDAC_ENABLED
+                    else -> LDAC_SUMMARY
+                }
                 SwitchPreference(
                     title = LDAC_TITLE,
-                    summary = if (ldacState > 0) LDAC_ENABLED else LDAC_SUMMARY,
+                    summary = ldacSummary,
                     checked = ldacState > 0,
                     onCheckedChange = onLdacChange
                 )

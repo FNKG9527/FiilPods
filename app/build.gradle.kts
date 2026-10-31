@@ -27,8 +27,16 @@ android {
         //   FIIL 走 SPP/RFCOMM MATE 协议，与 OPPO 的 VDID/VDSF/OESF/VDSP 私有 AT
         //   握手无关，所以这页对 FIIL 耳机纯属空转。整页连同入口、导航、配置字段、
         //   字符串资源一并移除。版本号保持 2.2.x 线，仅递增 patch。
-        versionCode = 5
-        versionName = "2.2.1"
+        // v2.2.2：修「详情页看不到 LDAC 开关」。
+        //   LDAC 是**耳机侧开关**（RFCOMM cid=1 cmdId=13 写 / cid=39 cmdId=143 读），
+        //   v2.2.0/2.2.1 只做了手机侧反射 A2dpService.setCodecConfigPreference，
+        //   耳机端从没人去打开它 —— 于是 A2DP 握手不声明 LDAC 能力，
+        //   FiilCodec.query() 永远返回 supported=false，详情页 `if (ldacState >= 0)`
+        //   不成立，开关永不渲染。这是个死锁：不显示就没入口打开，不打开就永远不显示。
+        //   现在「是否显示」改为按 earType 能力判（FiilModels.supportsLdac），
+        //   开关状态读耳机侧 143/142，点击时双管齐下（耳机侧 cmdId=13 + 手机侧 A2DP）。
+        versionCode = 6
+        versionName = "2.2.2"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 

@@ -376,6 +376,14 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                                     classLoader,
                                 )
                             }.onFailure { logW("ldac publish skipped", it) }
+                            // 耳机侧状态也要补一次（v2.2.2）。
+                            //
+                            // 上面 `FiilCodec.publishState` 查的是**手机 A2DP 视角**：
+                            // 耳机没开 LDAC 时它只会返回 known=false。而详情页需要知道
+                            // 「耳机自己开没开」（cid=39 cmdId=143）与「是否已解锁」（142），
+                            // 才能显示开关的初值和提示文案。这里跟 UI 的询问一起去读。
+                            runCatching { FIILProtocol.requestLdacState() }
+                                .onFailure { logW("ldac query skipped", it) }
                             if (!FiilRfcommController.isConnected) {
                                 // 这里是 UI 每 30s 一次的 UI_INIT 心跳顺手补连。
                                 // connect() 内部会拒绝「冷却期内」与「用户刚点过断开」
@@ -506,6 +514,29 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                         // 而不是停在用户点下去的位置上骗人。
                         OppoPodsAction.ACTION_LDAC_SET -> {
                             val want = intent.getBooleanExtra(OppoPodsAction.EXTRA_LDAC_ENABLED, false)
+                            // ---- 双管齐下 ----
+                            //
+                            // FIIL 的 LDAC 有**两个层面**，缺一不可：
+                            //
+                            // ① 耳机侧（真开关）：RFCOMM cid=1 cmdId=13 写 / cid=39 cmdId=143 读。
+                            //    耳机自己不开 LDAC，手机这条链路就永远是 AAC/SBC —— 这才是
+                            //    用户报「找不到 LDAC 开关」的根源：以前只做了 ②，耳机端没人
+                            //    去打开它，于是 A2DP 永远不声明 LDAC，开关永远不显示。
+                            //
+                            // ② 手机侧（协商结果）：反射 A2dpService 把编码器偏好改成 LDAC。
+                            //    耳机侧开了之后仍需要这一步，A2DP 才会真的切过去。
+                            //
+                            // 顺序很重要：先让耳机开，再改手机偏好。反过来的话手机侧改完
+                            // 时耳机还不支持，`setCodecConfigPreference` 会被系统拒掉。
+                            runCatching {
+                                RfcommLog.i(context ?: hostContext, TAG, "ldac headset-side -> want=$want")
+                                FIILProtocol.setLdacSwitch(want)
+                            }.onFailure {
+                                RfcommLog.w(
+                                    context ?: hostContext, TAG,
+                                    "ldac headset-side set failed: ${it.message}",
+                                )
+                            }
                             val device = FiilRfcommController.connectedDevice()
                             if (device == null) {
                                 RfcommLog.w(
@@ -520,8 +551,8 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                                 // 一次「离线时误点」就会让开关永久停在用户点的那一侧：
                                 // 用户以为 LDAC 开了，实际上耳机根本没在跑 LDAC，
                                 // 而且再怎么进页面都不会被纠正。
-                                // publishState(null) 会发出 known=false，UI 收到后把
-                                // ldacState 归到 -1，开关整个藏起来 —— 这才是诚实的表现。
+                                // publishState(null) 会发出 known=false，UI 收到后保持
+                                // ldacState 的原值但 ldacKnown=false，摘要显示「读取中」而不是骗人。
                                 FiilCodec.publishState(this@BluetoothProcessHook.hostContext, null, null)
                             } else {
                                 // 同 UI_INIT 分支：必须是 hook 自己的 `classLoader`。

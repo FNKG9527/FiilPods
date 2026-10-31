@@ -103,8 +103,14 @@ internal fun MainTabsScaffold(
     /** 语音提示音量线值 0=高 1=中 2=低 3=静音，-1 表示未知。 */
     toneVolume: Int,
     lowLatencyMode: Int,
-    /** LDAC 三态：-1=未知/不支持（不渲染开关）、0=支持但未启用、1=已启用。 */
+    /** LDAC 开关状态：-1=还没读到（开关仍显示，初值当关）、0=关、1=开。 */
     ldacState: Int,
+    /** 该机型是否支持耳机侧 LDAC 开关（决定详情页显不显示这一项）。 */
+    ldacSupported: Boolean,
+    /** 是否收到过耳机侧 LDAC 状态回包。 */
+    ldacKnown: Boolean,
+    /** 耳机侧 LDAC 是否已解锁授权。 */
+    ldacUnlocked: Boolean,
     onToneVolumeChange: (Int) -> Unit,
     onLowLatencyModeChange: (Int) -> Unit,
     onLdacChange: (Boolean) -> Unit,
@@ -260,6 +266,9 @@ internal fun MainTabsScaffold(
                         toneVolume = toneVolume,
                         lowLatencyMode = lowLatencyMode,
                         ldacState = ldacState,
+                        ldacSupported = ldacSupported,
+                        ldacKnown = ldacKnown,
+                        ldacUnlocked = ldacUnlocked,
                         onToneVolumeChange = onToneVolumeChange,
                         onLowLatencyModeChange = onLowLatencyModeChange,
                         onLdacChange = onLdacChange,
@@ -437,8 +446,14 @@ private fun EarphonesTabShell(
     /** 语音提示音量线值 0=高 1=中 2=低 3=静音，-1 表示未知。 */
     toneVolume: Int,
     lowLatencyMode: Int,
-    /** LDAC 三态：-1=未知/不支持（不渲染开关）、0=支持但未启用、1=已启用。 */
+    /** LDAC 开关状态：-1=还没读到（开关仍显示，初值当关）、0=关、1=开。 */
     ldacState: Int,
+    /** 该机型是否支持耳机侧 LDAC 开关（决定详情页显不显示这一项）。 */
+    ldacSupported: Boolean,
+    /** 是否收到过耳机侧 LDAC 状态回包。 */
+    ldacKnown: Boolean,
+    /** 耳机侧 LDAC 是否已解锁授权。 */
+    ldacUnlocked: Boolean,
     onToneVolumeChange: (Int) -> Unit,
     onLowLatencyModeChange: (Int) -> Unit,
     onLdacChange: (Boolean) -> Unit,
@@ -512,6 +527,9 @@ private fun EarphonesTabShell(
             toneVolume = toneVolume,
             lowLatencyMode = lowLatencyMode,
             ldacState = ldacState,
+            ldacSupported = ldacSupported,
+            ldacKnown = ldacKnown,
+            ldacUnlocked = ldacUnlocked,
             onToneVolumeChange = onToneVolumeChange,
             onLowLatencyModeChange = onLowLatencyModeChange,
             onLdacChange = onLdacChange,

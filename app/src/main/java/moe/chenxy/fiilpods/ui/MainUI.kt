@@ -131,13 +131,21 @@ fun MainUI(
     /** 低延迟档位（FIIL 专有，cid=37 cmd=0，线值 0=音乐 1=游戏 2=视频，-1=未知）。 */
     val lowLatencyMode = remember { mutableStateOf(-1) }
     /**
-     * LDAC 开关三态：`-1` 未知/本 ROM 反射不到 A2dpService（不渲染开关）、`0` 支持但未启用、`1` 已启用。
+     * LDAC 开关状态：`-1` 还没读到（开关仍显示，初值当关）、`0` 关、`1` 开。
      *
-     * 用 Int 而不是 Boolean 的原因：蓝牙进程里的 [moe.chenxy.fiilpods.pods.FiilCodec] 要反射
-     * `A2dpService.getCodecStatus(BluetoothDevice)` 才能知道耳机支不支持 LDAC；某些 ROM /
-     * 还没连上耳机时会返回 null。这种情况下必须能把开关整个藏掉，否则就是一个「点了不起作用」的假开关。
+     * ⚠ 语义在 v2.2.2 变了。以前 `-1` 表示「不支持 → 详情页整块不渲染」，这造成死锁：
+     * LDAC 是**耳机侧开关**（RFCOMM cid=1 cmdId=13 写 / cid=39 cmdId=143 读），
+     * 耳机默认不开 → A2DP 握手不声明该能力 → [moe.chenxy.fiilpods.pods.FiilCodec]
+     * 读到的 `supported=false` → 开关不显示 → 用户永远没有入口去打开它。
+     *
+     * 现在「显示与否」由**机型能力**决定（[moe.chenxy.fiilpods.pods.FiilModels.supportsLdac]，
+     * 见 [ldacSupported]），这个值只决定开关初值。
      */
     val ldacState = remember { mutableStateOf(-1) }
+    /** 是否收到过耳机侧 LDAC 状态回包（cid=39 cmdId=143）。没收到时摘要显示「读取中」。 */
+    val ldacKnown = remember { mutableStateOf(false) }
+    /** 耳机侧 LDAC 是否已解锁授权（cid=39 cmdId=142）。未解锁时开关应引导去官方 App。 */
+    val ldacUnlocked = remember { mutableStateOf(false) }
     val tabs = remember { MainTab.entries.toList() }
     var selectedTab by remember { mutableStateOf(MainTab.Module) }
     var hasAppliedDefaultTab by remember { mutableStateOf(false) }
@@ -352,16 +360,42 @@ fun MainUI(
                     }
 
                     OppoPodsAction.ACTION_PODS_LDAC_CHANGED -> {
-                        // 三态折叠：只要「状态未知」或「不支持」，一律落成 -1，让详情页把开关整个藏掉。
+                        // ⚠ 这条广播有**两条独立来源**，extra 前缀不同，必须分开读，
+                        // 否则后到的那条会把另一条的状态覆盖掉：
                         //
-                        // 历史 Bug（用户报「控制页找不到 LDAC 开关」）：publishState 只在编码器
-                        // 状态**发生变化**时才有回调，用户第一次进详情页时什么都没变，于是 UI
-                        // 永远收不到这条广播、ldacState 一直停在 -1、if (ldacState >= 0) 不成立。
-                        // 修法是让 UI_INIT / REFRESH_STATUS 也主动发一次（见 BluetoothProcessHook）。
+                        // 1) 手机侧 A2DP 视角（FiilCodec.publishState，`ldac_*`）：
+                        //    反射 A2dpService.getCodecStatus()，回答「这条链路当前
+                        //    协商成了什么编码器」。只在**编码器真的变了**或主动
+                        //    publishState 时才有值。
+                        //
+                        // 2) 耳机侧视角（OppoCompatBridge.publishHeadsetLdac，
+                        //    `headset_ldac_*`）：cid=39 cmdId=143/142 回包，
+                        //    回答「耳机自己开没开 LDAC / 是否已解锁」。
+                        //
+                        // 用户报的「找不到 LDAC 开关」根因就是只用了 1)：耳机默认不开
+                        // LDAC → A2DP 握手不声明该能力 → known=false → UI 落 -1 →
+                        // `if (ldacState >= 0)` 不成立 → 开关永远不渲染 → 死锁。
+                        // 现在「显示与否」交给 `ldacSupported`（按 earType 判），
+                        // 这里的值只决定开关**初值**。
                         val known = p1.getBooleanExtra(OppoPodsAction.EXTRA_LDAC_KNOWN, false)
                         val supported = p1.getBooleanExtra(OppoPodsAction.EXTRA_LDAC_SUPPORTED, false)
                         val enabled = p1.getBooleanExtra(OppoPodsAction.EXTRA_LDAC_ENABLED, false)
-                        ldacState.value = if (!known || !supported) -1 else if (enabled) 1 else 0
+                        val headsetKnown =
+                            p1.getBooleanExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_KNOWN, false)
+                        val headsetEnabled =
+                            p1.getBooleanExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_ENABLED, false)
+                        val headsetUnlocked =
+                            p1.getBooleanExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_UNLOCKED, false)
+
+                        if (p1.hasExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_KNOWN)) {
+                            // 耳机侧优先：它才是真开关。
+                            ldacKnown.value = headsetKnown
+                            ldacUnlocked.value = headsetUnlocked
+                            if (headsetKnown) ldacState.value = if (headsetEnabled) 1 else 0
+                        } else {
+                            ldacKnown.value = known
+                            if (known && supported) ldacState.value = if (enabled) 1 else 0
+                        }
                     }
 
                     OppoPodsAction.ACTION_OPEN_CODEC_SETTINGS -> {
@@ -385,6 +419,12 @@ fun MainUI(
                             ?.toIntOrNull()
                             ?.takeIf { it > 0 }
                             ?: FiilModels.earTypeOfName(deviceName)
+                        // 换设备连上时耳机侧 LDAC 状态必须重置为「未知」。
+                        // 否则会拿着上一台耳机的 `ldacKnown=true` 直接显示它的开关值，
+                        // 而新耳机其实还没回 143/142 —— 用户看到的就是错的。
+                        ldacState.value = -1
+                        ldacKnown.value = false
+                        ldacUnlocked.value = false
                         connectingDeviceAddress = null
                         mainTitle.value = deviceName ?: ""
                         earphonePrefs.value = PodImagePrefs.upsertConnected(
@@ -431,14 +471,20 @@ fun MainUI(
                         hookConnectionState = "disconnected"
                         hookConnected.value = false
                         hasAutoOpenedConnectedDevice = false
-                        // 断开后必须把 LDAC 状态打回「未知」。
+                        // 断开后必须把 LDAC 三个状态全部打回「未知」。
                         // 否则开关会带着上一台耳机的状态留在界面上：用户点它时
                         // `setLdacEnabled()` 会先乐观更新成 1/0，再向蓝牙进程发
                         // `ACTION_LDAC_SET`；蓝牙进程此时 `connectedDevice()` 返回 null，
                         // 只能回一个 known=false —— 界面会闪一下再消失，观感是「点了没用」。
-                        // 打回 -1 后 `PodDetailPage` 的 `if (ldacState >= 0)` 直接不渲染这一项，
-                        // 断开态下不再出现一个必然无效的开关。
+                        //
+                        // v2.2.2 起渲染条件改成 `if (ldacSupported)`（按机型能力判），
+                        // 断开时 `connectedEarType` 已被置 -1 → `ldacSupported` 为 false
+                        // → 这一项本来就不会渲染。这里仍然清状态，是为了防止「换一台耳机
+                        // 立刻连上」时摘要短暂显示上一台的旧值（`ldacKnown` 还是 true，
+                        // 会跳过「正在读取耳机状态…」直接显示「已启用」）。
                         ldacState.value = -1
+                        ldacKnown.value = false
+                        ldacUnlocked.value = false
                     }
 
                     OppoPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE -> {
@@ -871,6 +917,11 @@ fun MainUI(
                 lowLatencyMode = lowLatencyMode.value,
                 onLowLatencyModeChange = { setLowLatencyMode(it) },
                 ldacState = ldacState.value,
+                // 显示与否按**机型能力**判，不按 A2DP 反射结果判 —— 后者是个自锁：
+                // 耳机不开 LDAC，A2DP 就不声明该能力，于是永远读不到、开关永远不显示。
+                ldacSupported = FiilModels.supportsLdac(connectedEarType.intValue),
+                ldacKnown = ldacKnown.value,
+                ldacUnlocked = ldacUnlocked.value,
                 onLdacChange = { setLdacEnabled(it) },
                 spatialAudioSupported = displayCapabilities.spatialAudioSupported,
                 spatialSoundSupported = displayCapabilities.spatialSoundSwitchSupported,

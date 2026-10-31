@@ -186,6 +186,26 @@ object FiilModels {
     fun supportsWearDetect(earType: Int): Boolean = earType in WEAR_DETECT
 
     // ------------------------------------------------------------------
+    // LDAC 高清解码
+    // ------------------------------------------------------------------
+    //
+    // 取证方式：扫官方 App `com\fengeek\main\` 下所有 `setLdacSwitch(` 调用点：
+    //   F046HomeFragment（Key Max）、F048HomeFragment（GS Links）、
+    //   F049HomeFragment（Key Pro2）、F051HomeFragment（CC3）、
+    //   F053HomeFragment、ele_cc_pro2_fragment（CC Pro2）
+    // 换算成 earType 就是 46 / 48 / 49 / 51 / 53 / 39。
+    //
+    // ⚠ 这个集合决定「UI 要不要显示 LDAC 开关」，**不能**改用「手机 A2DP 有没有
+    // 声明 LDAC 能力」来判断 —— LDAC 是**耳机侧开关**：耳机不开，A2DP 握手时就不
+    // 声明 support，手机 `getCodecs()` 里只有 AAC/SBC，于是「查不到 → 不显示开关
+    // → 用户永远没法打开」，形成死锁。这正是 v2.2.1 及之前版本「找不到 LDAC 开关」
+    // 的根因。
+    private val LDAC_EAR_TYPES: Set<Int> = setOf(39, 46, 48, 49, 51, 53)
+
+    /** 该机型是否支持耳机侧的 LDAC 开关（cid=1 cmd=13 / cid=39 cmd=143）。 */
+    fun supportsLdac(earType: Int): Boolean = earType in LDAC_EAR_TYPES
+
+    // ------------------------------------------------------------------
     // 自适应开关（与 MAF 档位并列的独立开关，不是 MAF 的第 5 档）
     // ------------------------------------------------------------------
     //

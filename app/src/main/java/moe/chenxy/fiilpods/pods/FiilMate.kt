@@ -284,6 +284,23 @@ object FiilMate {
          * （`F046HomeFragment.java:524-538 setVolume(int)` 逐档写死）。
          */
         const val TONE = 3              // f.java setTone
+        /**
+         * **LDAC 开关**（耳机侧），buffer=[0/1] —— `c.java:371-385 setLdacSwitch(boolean)`。
+         *
+         * ⚠ 与查询号**不对称**：查开关状态用 [Query.LDAC_SWITCH] = 143，
+         * 而写开关用的是 cid=1 + cmdId=**13**（`setCommandClassifyId(1)` + `setCommandId(13)`）。
+         * 这是逆向里最容易踩的坑 —— 写成 `sendMate(QUERY, 143, ...)` 只会变成一次查询。
+         *
+         * 帧：`00 01 01 00 03 0D 01 [0/1]`；回显 `00 01 02 00 01 0D 00`（末字节 0 = 成功）。
+         */
+        const val LDAC_SWITCH = 13      // c.java:371 setLdacSwitch
+        /**
+         * LDAC **授权/激活**写入，payload = 17 字节授权码 —— `c.java:287-300 setActivationLdac(byte[])`。
+         *
+         * 取消激活时 APP 传 17 个 0 字节（`F046HomeFragment.java:94-95`）。
+         * 模块不做授权码输入（那是官方 App 的商业流程），只保留常量以便将来支持「取消激活」。
+         */
+        const val LDAC_ACTIVATE = 12    // c.java:287 setActivationLdac
         const val TUNING = 8            // f.java setTuning（云感调音）
         const val EQ_ADAPTIVE = 14      // f.java setEQAdaptive
         const val EAR_ADAPTIVE = 15     // f.java/h.java setEarAdaptive

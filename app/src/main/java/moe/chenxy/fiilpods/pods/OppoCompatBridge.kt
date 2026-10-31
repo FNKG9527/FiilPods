@@ -94,6 +94,8 @@ object OppoCompatBridge {
     private var lastTone: Int? = null
     /** 低延迟档位（0=音乐 1=游戏 2=视频）。 */
     private var lastLatency: Int? = null
+    /** 耳机侧 LDAC 三态（`known/enabled/unlocked` 拼串，便于变化检测）。 */
+    private var lastLdac: String? = null
     private var lastConnected: Boolean? = null
     private var lastState: String = ""
 
@@ -133,6 +135,7 @@ object OppoCompatBridge {
         publishDual(ctx, status, force)
         publishToneVolume(ctx, status, force)
         publishLowLatencyMode(ctx, status, force)
+        publishHeadsetLdac(ctx, status, force)
     }
 
     /**
@@ -366,6 +369,35 @@ object OppoCompatBridge {
         }
     }
 
+    /**
+     * 耳机侧 LDAC 三态（v2.2.2 新增）。
+     *
+     * ⚠ 和 [moe.chenxy.fiilpods.pods.FiilCodec] 那条 `ACTION_PODS_LDAC_CHANGED` 不是一回事：
+     * - `FiilCodec` 那条是**手机侧 A2DP 视角**：反射 `A2dpService.getCodecStatus()`，
+     *   回答「当前这条链路协商成了什么编码器」。
+     * - 这条是**耳机侧视角**：读 cid=39 cmdId=143（开关）与 142（解锁授权），
+     *   回答「耳机自己开没开 LDAC」。
+     *
+     * 两者会不一致：耳机没开 LDAC 时，A2DP 握手不会声明 LDAC 能力，
+     * 于是 `FiilCodec` 那条永远返回 known=false —— 这正是用户「控制页找不到
+     * LDAC 开关」的根因。所以开关该显示与否必须由耳机侧 + 机型能力共同决定。
+     *
+     * 广播的 action 复用 `ACTION_PODS_LDAC_CHANGED`，但用**不同的 extra 前缀**
+     * （`headset_ldac_*`），让接收端能区分两条来源、互不覆盖。
+     */
+    private fun publishHeadsetLdac(ctx: Context, s: FiilStatus, force: Boolean) {
+        if (s.earType <= 0) return
+        if (!FiilModels.supportsLdac(s.earType)) return
+        val key = "${s.ldacKnown}/${s.ldacEnabled}/${s.ldacUnlocked}"
+        if (!force && lastLdac == key) return
+        lastLdac = key
+        send(ctx, OppoPodsAction.ACTION_PODS_LDAC_CHANGED) {
+            putExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_KNOWN, s.ldacKnown)
+            putExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_ENABLED, s.ldacEnabled)
+            putExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_UNLOCKED, s.ldacUnlocked)
+        }
+    }
+
     /** UI 手动刷新时把缓存清空，保证全量重发。 */
     fun resetCache() {
         lastAnc = Int.MIN_VALUE
@@ -377,6 +409,7 @@ object OppoCompatBridge {
         lastDual = null
         lastTone = null
         lastLatency = null
+        lastLdac = null
         lastConnected = null
         lastState = ""
     }

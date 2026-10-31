@@ -67,6 +67,31 @@ data class FiilStatus(
      * -1 表示尚未读到 / 该机型不支持。
      */
     val toneVolume: Int = -1,
+    /**
+     * 耳机侧 LDAC 开关的**真实状态**（cid=39 cmdId=143 回包）。
+     *
+     * 与 [moe.chenxy.fiilpods.pods.FiilCodec] 那套完全独立：
+     * - `FiilCodec` 查的是**手机 A2DP 当前跑在哪个编码器**（反映结果，有滞后）；
+     * - 这里查的是**耳机自己的开关位**（真因），耳机不开就永远不会协商成 LDAC。
+     *
+     * false 时 UI 仍显示开关（只要 [supportsLdac]，见 PodDetailPage），
+     * 否则就退化成「不开 → 查不到 → 不显示 → 更打不开」的死锁。
+     */
+    val ldacEnabled: Boolean = false,
+    /**
+     * 耳机侧 LDAC 是否**已解锁/授权**（cid=39 cmdId=142 回包，payload[0]==1）。
+     *
+     * 未解锁的耳机即使写 cmdId=13 也会回 ACK，但不会真的切到 LDAC
+     * （见 `docs/PROTOCOL_PC.md` §9bis.3 的同类记载）。模块不做授权码输入，
+     * 只能在未解锁时提示用户先用官方 App 解锁。
+     */
+    val ldacUnlocked: Boolean = false,
+    /**
+     * 耳机侧 LDAC 状态是否**已知**（是否收到过 143 回包）。
+     *
+     * 老机型/无 LDAC 机型永远收不到，UI 据此决定显示「开关」还是「--」。
+     */
+    val ldacKnown: Boolean = false,
 ) {
     val modelName: String get() = FiilModels.nameOf(earType)
 
@@ -113,6 +138,9 @@ data class FiilStatus(
         put("tuning", tuning)
         put("earTypeOverridden", earTypeOverridden)
         put("toneVolume", toneVolume)
+        put("ldacEnabled", ldacEnabled)
+        put("ldacUnlocked", ldacUnlocked)
+        put("ldacKnown", ldacKnown)
     }.toString()
 
     companion object {
@@ -150,6 +178,9 @@ data class FiilStatus(
                     tuning = o.optBoolean("tuning", false),
                     earTypeOverridden = o.optBoolean("earTypeOverridden", false),
                     toneVolume = o.optInt("toneVolume", -1),
+                    ldacEnabled = o.optBoolean("ldacEnabled", false),
+                    ldacUnlocked = o.optBoolean("ldacUnlocked", false),
+                    ldacKnown = o.optBoolean("ldacKnown", false),
                 )
             }.getOrDefault(EMPTY)
         }
