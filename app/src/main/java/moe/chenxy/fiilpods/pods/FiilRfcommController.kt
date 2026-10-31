@@ -2383,12 +2383,17 @@ object FiilRfcommController {
         }
 
         // 3) 系统侧：电量
-        val batteryKey = "$batteryLeft/$batteryRight/$batteryCase"
+        //
+        // 去重键里带上 earType：通知栏的耳机图案由 earType 决定，如果耳机换了
+        // 型号但左右耳/充电盒电量数值碰巧一样（同型号耳机、或多点连接时切到另一台
+        // 同型号设备），只按电量去重会导致新图案永远发不出去，通知栏一直显示旧图。
+        val batteryKey = "$batteryLeft/$batteryRight/$batteryCase/$earType"
         if (force || lastPublishedBattery != batteryKey) {
             lastPublishedBattery = batteryKey
             broadcastToTargets(ctx, FiilAction.ACTION_PODS_BATTERY_CHANGED) {
                 putExtra(FiilAction.EXTRA_ADDRESS, deviceAddress.orEmpty())
                 putExtra(FiilAction.EXTRA_DEVICE_NAME, deviceName.orEmpty())
+                putExtra(FiilAction.EXTRA_EAR_TYPE, earType)
                 putExtra(FiilAction.EXTRA_LEFT_BATTERY, batteryLeft.coerceAtLeast(0))
                 putExtra(FiilAction.EXTRA_LEFT_CONNECTED, batteryLeft >= 0)
                 putExtra(FiilAction.EXTRA_RIGHT_BATTERY, batteryRight.coerceAtLeast(0))

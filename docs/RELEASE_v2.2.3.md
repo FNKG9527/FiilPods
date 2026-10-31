@@ -1,39 +1,39 @@
-# FiilPods v2.2.2 发布说明
+# FiilPods v2.2.3 发布说明
 
 > 基线：`2aa474f` (v2.1.0) + `d4eb3cf`（README）。
-> 本版做九件事：修用户提出的 5 个实机 Bug、保证「伪装耳机型号」端到端可用、
-> 修掉「连接/断开反复来回跳」的自激回路（第九节）、
-> 从 FIIL+ 逆向资源里取全套耳机产品图，主页按连接型号显示对应图标（第十节）、
-> 修掉融合中心切模式后图标仍卡在旧值的问题（第十一节：通知投递时机）、
-> 针对 MiLink 18.2 的「策略模式」重构补齐 ProfileContext 层 hook（第十二节）、
-> 修掉切模式时图标「闪一下旧值再闪回来」的问题（第十三节：待确认窗口）、
-> 重修 Bug 2 焦点通知 —— 旧的两条 hook 路径在 HyperOS 4 上全部失效（第十四节）、
-> **删掉 OPPO 的 LE Audio 设置页**（第十五节：只有 UI 壳、零 hook 实现）、
-> 并**修掉「详情页根本看不到 LDAC 开关」**（第十六节：耳机侧开关从未被发送）。
+> 本版在 v2.2.2 基础上做一件事：**修「图标不跟耳机型号走」**——
+> 融合设备中心那台耳机不管接什么型号都显示普通蓝牙耳机图标（第十七节 17.2–17.4：
+> MiLink 拿 FIIL 的假设备 ID 去查小米自家编码表，命不中恒返回 0），
+> 通知栏卡片右侧也永远是同一张通用盒子图（17.5–17.6：广播从来不携带 earType）。
+> 其余为 v2.2.2 及更早的累积说明，原样保留。
 > 不重写架构。断连回路用的是「记账 + 闸门 + 递增冷却」的最小刹车，
 > **不是** 2.2.0 那一套被否掉的熔断器（见 9.5 与 9.8）。
 
 | 项 | 值 |
 | --- | --- |
 | 应用名 | `FiilPods 2.2 Fix`（`res/values/strings.xml:2`、`res/values-zh-rCN/strings.xml:3`） |
-| versionCode / versionName | 6 / `2.2.2`（`app/build.gradle.kts:30-31` 起） |
-| 改动面 | 25 files changed, +2144 / −655（另有 4 个新增源文件、31 个新增图片资源、3 个删除的源文件）+ 本轮 LDAC 修复（8 files changed, +233 / −45） |
-| 新增文件 | `pods/FiilCodec.kt`（422 行）、`pods/PodImages.kt`（105 行）、`utils/NotifPermission.kt`（75 行）、`app/src/test/java/moe/chenxy/fiilpods/pods/PodImagesTest.kt`（108 行） |
-| 删除文件 | `config/LeAudioConfig.kt`、`ui/pages/LeAudioSettingsPage.kt`、`ui/dialogs/LeAudioDevicesDialog.kt`（共 −362 行，见第十五节） |
-| 新增资源 | `res/drawable-nodpi/` 下 31 个 webp（30 张官方产品图 + `fiil_unknow` 兜底），合计 498,288 B |
-| 删除资源 | `strings.xml` / `values-zh-rCN/strings.xml` 各 42 条 `le_audio_*` 字符串（共 84 条） |
-| 构建 | `clean` + `testDebugUnitTest` + `assembleDebug` + `assembleRelease` → BUILD SUCCESSFUL in 3m 58s, EXIT=0 |
-| 单测 | suites=4, tests=57, failures=0, errors=0, skipped=0 |
-| 产物 | `dist/FiilPods-v2.2.2-debug.apk`(35,687,120 B)、`dist/FiilPods-v2.2.2-release.apk`(4,543,340 B) |
-| release SHA256 | `897726447F172F307AC8F518314BA778CCFE12CFB646D3D3D806603421C3C24C` |
-| debug SHA256 | `4C8C33073650AF4EDCD354DD4823389C4E504C76C2F5C9BAB8E9814190CD3324` |
-| 上一版（v2.2.1）release SHA256 | `BA45F8140C37CC4406BAC0D713F619B28B58AF2E35AA12C7B4533E77FE6D2FAF` |
-| 再上一版（v2.2.0）release SHA256 | `BA6E4FDB75A4111F816498D053E45C09A2FC322ECC08835E6A0560952EC5477D` |
+| versionCode / versionName | 7 / `2.2.3`（`app/build.gradle.kts:38-39` 起） |
+| 改动面 | 本轮 7 files changed（4 改 + 1 新增源文件 + 1 新增测试 + 1 版本号）；累计自 v2.1.0 见下 |
+| 新增文件（本轮） | `app/src/test/java/moe/chenxy/fiilpods/pods/HeadphoneFormFactorTest.kt`（108 行） |
+| 构建 | `testDebugUnitTest` + `assembleDebug` + `assembleRelease` → BUILD SUCCESSFUL（分步执行，见下方说明） |
+| 单测 | suites=5, tests=64, failures=0, errors=0, skipped=0（较 v2.2.2 的 57 项新增 7 项） |
+| 产物 | `dist/FiilPods-v2.2.3-debug.apk`(36,161,343 B)、`dist/FiilPods-v2.2.3-release.apk`(4,543,344 B) |
+| release SHA256 | `416E2780351FADF74AB75BD32ED6D565FE2857F9064052FD0D70662CD4EA4FD6` |
+| debug SHA256 | `84534EA5A0A8D2FC1C1CE8438EA86770F40184E2C198C7182D869E722681904B` |
+| 上一版（v2.2.2）release SHA256 | `897726447F172F307AC8F518314BA778CCFE12CFB646D3D3D806603421C3C24C` |
 
 > 构建方式说明：**必须用 `clean` 后重建的产物交付**。此前增量构建出的 release 包
 > 虽然源码 mtime 全部早于 APK、内容一致，但 SHA256 与 clean 重建结果不同
 > （`797BEE53…` → `C9BBE47F…` → `413CB435…` → `608345B2…` → `9F10F075…` → `86078BFF…` → `F513DCC6…`），
 > 说明增量构建存在缓存差异，不能作为交付依据。
+>
+> **本轮构建环境说明**：`clean + test + assembleDebug + assembleRelease` 串行执行时，
+> R8 阶段（`minifyReleaseWithR8`）两次因物理内存不足崩溃
+> （`hs_err_pid*.log`：`Native memory allocation (mmap) failed ... G1 virtual space`，
+> 当时系统仅剩 ~2GB 空闲）。改为分步执行后全部成功：
+> 先 `:app:testDebugUnitTest`（`-Xmx1400m`），再 `:app:assembleRelease`（`-Xmx1500m`），
+> 最后 `:app:assembleDebug`。这不是代码问题，是构建机内存约束。
+> 已确认 `source files newer than apk: 0`。
 
 ---
 
@@ -2045,7 +2045,196 @@ val ok = FiilCodec.setLdac(device, want, classLoader)   // ② 再把手机侧�
 5. **摘要显示「需先在 FIIL+ 官方 App 里解锁高清音频」** → 这台耳机还没解锁 LDAC，
    先在官方 App 里操作一次，再回来点开关。
 
-## 十七、回归验证清单
+## 十七、图标不跟型号走：融合中心恒为普通耳机图 + 通知栏恒为通用盒子图（2.2.3 新增）
+
+### 17.1 现象
+
+用户报两处：
+
+1. **融合设备中心**里那台耳机，不管接的是头戴式还是入耳式，图标永远是同一个
+   「普通蓝牙耳机」图案。
+2. **通知栏**常驻卡片右侧的耳机图，换型号也不变。
+
+### 17.2 融合中心：为什么恒为普通耳机图
+
+MiLink 的图标选择分两步，都在 `com.milink.service` 里：
+
+**第一步：算 headset_type**
+
+`smali_classes2/com/miui/circulate/api/protocol/bluetooth/BluetoothServiceClient.smali:964`
+的 `getHeadsetType(BluetoothDevice)` 方法体只有三段：
+
+```
+iget-object v0, p0, ...->mxBluetoothManager
+invoke-virtual {v0, p1}, MxBluetoothManager->getDeviceId(BluetoothDevice)String
+invoke-static {v0}, Lvg/a;->b(Ljava/lang/String;)I
+return p1
+```
+
+`mxBluetoothManager.getDeviceId(BluetoothDevice)` **已经被本项目 hook 成
+`fakeDeviceId()`**（伪装耳机型号功能要用它）。默认返回 `"01010607"`。
+
+而 `vg/a.b(String)` 是按**小米自家 6 位设备编码**做判定的：
+
+| 私有无参判定 | 返回 headset_type | 含义 |
+|---|---|---|
+| `n(id)` | 7 | 头戴式 |
+| `d(id)` | 5 | AirPods 类 |
+| `e(id)` | 6 | AirPods 头戴类 |
+| `r(id)` | 4 | 开放式 |
+| `s(id)` | 2 | 单耳 |
+| `i(id)` | 3 | 普通耳机 |
+| `k(id)` | 8 / `w(id)` | 9 | 特殊 |
+| 全不命中 | **0** | 未知 |
+
+`"01010607"` 命不中任何一条（它是 FIIL 的假 ID，不是小米编码），
+所以 `getHeadsetType()` **恒返回 0**。
+
+**第二步：按 headset_type 选图标**
+
+`smali_classes3/com/miui/circulate/world/utils/a0.smali:7` 的 `a(CirculateDeviceInfo)`
+读 `getInt("headset_type", 0)`，然后 packed-switch：
+
+| headset_type | 图标资源 |
+|---|---|
+| 2 | `circulate_single_battery_headset_icon` |
+| 3 | `circulate_headset_icon`（普通） |
+| 4 | `circulate_device_headset_openwear` |
+| 5 | `circulate_airpods_headset_icon` |
+| 6 | `circulate_airpods_headphones_headset_icon` |
+| **7** | **`circulate_device_headset_headphones`（头戴式）** |
+| 8 / 9 | `a0.b(headset_id)` |
+| 默认（0 走这里） | `circulate_headset_icon`（普通） |
+
+0 落到 `:pswitch_0` 默认分支 → `circulate_headset_icon`。
+**这就是「融合中心永远是普通耳机图标」的完整成因。**
+
+### 17.3 修法：直接接住 `getHeadsetType`，按真实形态返回 7 或 3
+
+不采用「把 `fakeDeviceId` 改成命中 `vg/a.n(id)` 的编码」这条路 ——
+那是小米自家的编码空间，改它等于伪造一个小米设备身份，会连带影响
+`vg/a` 的其它判定（设备表、能力表），副作用不可控；而用户还能在设置里
+自己改假 ID，一改就会再次落空。
+
+改为在 `MiLinkServiceHook` 里挂 `getHeadsetType`：
+
+```kotlin
+hookDeviceResult(CLS_BT_SERVICE_CLIENT, "getHeadsetType") { headsetTypeIcon() }
+```
+
+`headsetTypeIcon()` 读持久化的 `earType`，经 `FiilModels.isHeadphones()` 判形态，
+返回 `7`（头戴）或 `3`（普通）。这样图标由官方 `a0.a()` 自己选，
+**用的就是小米官方那两张图**，跟小米自家设备同一个渲染路径，
+不存在「我们自己画一个像官方的图」的失真。
+
+### 17.4 哪些型号算头戴式（这张表必须准确）
+
+只有 6 个 earType 是头戴：
+
+| earType | 型号 | 依据 |
+|---|---|---|
+| 2 | FIIL Wireless | 快科技《fiil 蓝牙无线款》：「头戴包耳的 fiil」 |
+| 5 | Diva Pro | Diva 系 |
+| 8 | Diva | 新浪众测：「FIIL 家的头戴式无线降噪耳机 Diva」 |
+| 46 | **Key Max** | IT之家：「上架了 FIIL Key Max 深度主动降噪**头戴式**蓝牙耳机」；52audio 拆解报告标题同 |
+| 247 | Diva2 | Diva 系 |
+| 250 | Diva2 Pro | Diva 系 |
+
+其余全部是入耳/半入耳（CC 系 21/28/30/37/39、Key 系 38/41/49、T 系
+17/22/26/27/29/35、CG 系 31/33）或开放式（GS 系 43/45/48、Atom 47）。
+F042 Aviator 是音箱，不在耳机体系内。
+
+**第一版实现漏了 Key Max（46）** —— 当时按产品线直觉只写了 Diva 系 + Wireless，
+而 46 恰好是用户手上那台，于是他看到的就是「还是普通图标」。现在由
+`HeadphoneFormFactorTest` 把 6 个型号全体钉死（`(0..300).filter { isHeadphones(it) }`
+必须**恰好等于** `setOf(2,5,8,46,247,250)`），少一个多一个都会红。
+
+### 17.5 通知栏：为什么恒为通用盒子图
+
+`hook/MiBluetoothToastHook.kt` 的 `updateNotification()` 里，焦点通知大图走的是：
+
+```kotlin
+PodImageLoader.loadBoxBitmap(ctx, prefs, address)   // 旧
+```
+
+而 `loadBoxBitmap` = 「用户自定义图 or `img_box.png`」——**没有型号这一级**。
+所以不管接的是 Diva、Key Max 还是 CC nano，右侧永远是同一张通用盒子图。
+
+更根本的是：**通知进程拿不到 earType**。`updateNotification` 跑在
+`com.xiaomi.bluetooth` 进程里，而 `earType` 是蓝牙进程
+`FiilRfcommController` 的实例字段，两个进程不共享内存；
+`ACTION_PODS_BATTERY_CHANGED` 的 extras 里也从来没有 earType
+（`pods/FiilAction.kt` 里没有这个键）。
+
+### 17.6 修法：广播带 earType + 三级回落取图
+
+**① 契约加字段**（`pods/FiilAction.kt`）：
+
+```kotlin
+const val EXTRA_EAR_TYPE = "ear_type"
+```
+
+**② 发送端带上它**（`pods/FiilRfcommController.kt` 的 `publishState()`）：
+
+```kotlin
+putExtra(FiilAction.EXTRA_EAR_TYPE, earType)
+```
+
+同时把去重键从 `"$batteryLeft/$batteryRight/$batteryCase"` 改成
+`"$batteryLeft/$batteryRight/$batteryCase/$earType"`。**这一步是必须的**：
+如果只改 extra 不改去重键，那么「换了同型号的另一台耳机」或「多点连接切到
+另一台同型号设备」时电量数值一模一样，广播会被去重吞掉，新图案永远发不出去。
+
+**③ 取图改三级回落**（新增 `PodImageLoader.loadModelBoxBitmap()`）：
+
+1. 用户在模块里给这台耳机设的自定义图（用户的显式选择优先）；
+2. 该型号的官方产品图 `PodImages.drawableOf(earType)`；
+3. 通用 `img_box.png`。
+
+`earType <= 0` 时**跳过第 2 级**：`PodImages.drawableOf()` 对未收录型号回落
+`fiil_unknow`，那是「官方也不认识这个型号」的意思，摆进通知栏并不比通用图
+更有信息量，反而会让人误判设备。
+
+### 17.7 状态栏小图标**故意不改**
+
+`setSmallIcon()` 保持 `android.R.drawable.stat_sys_data_bluetooth`。
+
+原因：Android 的状态栏图标**只取位图的 alpha 通道**做单色着色。
+实测 31 张型号图里 27 张带 alpha，但它们都是「不透明彩色主体 + 透明背景」的
+产品照 —— 压成单色剪影后，24dp 下就是一团认不出的色块，比系统蓝牙图标更难辨识。
+（另外 4 张 `t1_lite` / `t1_x` / `t1_xs` / `fiil_unknow` 干脆没有 alpha，
+传进去就是实心方块。）
+
+要按型号区分小图标，必须另做一套**单色矢量剪影**（每型号一个 path），
+不属于本次改动的范围。用户实际看到的那张图是**大图**
+（`headsetBitmap` → `FocusNotification` 的 `iconTextInfo` / `island`），
+它在本次改动里已经跟着型号走了。
+
+### 17.8 怎么验证
+
+1. 接 Key Max（earType=46）→ 下拉控制中心看融合中心 → 图标应是**头戴式**
+   （`circulate_device_headset_headphones`，戴在头上的那副）。
+2. 换一个入耳式（如 CC nano，earType=28）→ 图标应变成**普通入耳式**
+   （`circulate_headset_icon`）。
+3. 通知栏常驻卡片右侧 → 应显示对应型号的**官方产品图**，不是通用盒子图。
+4. 接了耳机但 `earType` 还没读到的极短窗口内 → 通知栏落通用图，融合中心落普通图，
+   **不会崩、不会空白**（这是 `earType <= 0` 分支的兜底）。
+5. 给某台耳机设了自定义图 → 通知栏应显示**自定义图**（优先级高于型号图）。
+
+### 17.9 排查指引
+
+| 现象 | 定位 |
+|---|---|
+| 融合中心图标仍是普通图 | 查 logcat 有没有 MiLink hook 失败告警；确认 `earType` 真的读到了（详情页能显示型号图就说明读到了） |
+| 换了型号但融合中心不变 | `BluetoothServiceClient.setHeadsetType` 的调用点在 `:1669` / `:1854`，只在**设备列表刷新**时触发；拔掉重连或重进融合中心才会重新算 |
+| 通知栏仍是通用图 | 先确认 `ear_type` 是否进了广播：`adb shell dumpsys activity broadcasts` 或模块日志里 `battery rx ... ear=` 那行 |
+| 通知栏一直是旧型号图 | 去重键已含 earType，正常情况下会刷新；若仍不刷，开机/重连后 `force=true` 的首次发布会覆盖 |
+
+> 注意：本次改动涉及**两个进程**（`com.milink.service` 的 MiLinkServiceHook、
+> `com.xiaomi.bluetooth` 的 MiBluetoothToastHook）。LSPosed 只在进程启动时注入，
+> 装完必须**关开蓝牙 + 重启融合中心**（或直接重启手机），否则改的是旧进程里的代码。
+
+## 十八、回归验证清单
 
 1. 耳机控制页能看到 LDAC 开关，开关能真正切 LDAC（`dumpsys bluetooth_manager` 里 codec 变 LDAC）。
 2. 通知栏出现耳机卡片：电量三行、降噪循环按钮、断开按钮、AOD 显示。
@@ -2172,3 +2361,20 @@ val ok = FiilCodec.setLdac(device, want, classLoader)   // ② 再把手机侧�
     LDAC 那一项。这是白名单生效的反向验证。
 57. **（2.2.2 新增）** 未解锁的耳机上点开关 → 摘要应显示「需先在 FIIL+ 官方 App 里解锁高清音频」，
     且**开关不被置灰**（允许点，走正常下发流程）。
+
+58. **（2.2.3 新增，本轮核心）** 接 FIIL Key Max（earType=46，头戴式）→ 下拉控制中心
+    打开融合设备中心 → 那台耳机的图标应是**头戴式**（`circulate_device_headset_headphones`，
+    戴在头上的那副），**不是**普通入耳图。这是第一版漏掉 46 时的失败点。
+59. **（2.2.3 新增）** 换成入耳式（如 CC nano，earType=28）→ 图标应变成**普通入耳式**
+    （`circulate_headset_icon`）。与第 58 条对照才能证明「跟着型号变」而不是「换了个固定图」。
+60. **（2.2.3 新增）** 通知栏常驻卡片右侧 → 应显示**该型号的官方产品图**（与主页「当前耳机」
+    卡片上那张图一致），不是通用盒子图。
+61. **（2.2.3 新增）** 给某台耳机在模块里设一张自定义图 → 通知栏应显示**自定义图**
+    （优先级：自定义 > 型号官方图 > 通用图）。
+62. **（2.2.3 新增）** 接了耳机但型号尚未读到的极短窗口内 → 通知栏落通用图、融合中心落普通图，
+    **不崩、不空白**（`earType <= 0` 兜底分支）。
+63. **（2.2.3 新增）** 装完本版后**必须**关开蓝牙一次（或重启手机）再看第 58–60 条 ——
+    本次改动落在 `com.milink.service` 与 `com.xiaomi.bluetooth` 两个进程，
+    LSPosed 只在进程启动时注入。不重启看到的仍是旧代码，会误判成「没修好」。
+64. **（2.2.3 新增）** 状态栏最左侧的小图标**仍是系统蓝牙图标**，这是**故意**的
+    （见 17.7：彩色产品照压成单色剪影在 24dp 下认不出），不要当缺陷报。

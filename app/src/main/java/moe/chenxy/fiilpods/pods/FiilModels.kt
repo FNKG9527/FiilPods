@@ -109,6 +109,49 @@ object FiilModels {
      */
     private val MATE_EAR_TYPES: Set<Int> = setOf(45, 46, 47, 48, 49, 51, 53)
 
+    /**
+     * **头戴式（over-ear）机型**。
+     *
+     * 用途见 [isHeadphones]：融合设备中心的小米官方图标只有两种形态
+     * （`circulate_device_headset_headphones` 头戴式 / `circulate_headset_icon`
+     * 入耳式），系统靠 `headset_type` 整数区分，所以这里必须给出明确的二分。
+     *
+     * ## 逐个型号的取证
+     *
+     * | earType | 型号 | 形态 | 依据 |
+     * |---|---|---|---|
+     * | 2 | FIIL Wireless | 头戴包耳 | `news.mydrivers.com/1/452/452404.htm`：「头戴包耳的 fiil（蓝牙无线款为 fiil wireless）」 |
+     * | 5 | FIIL Diva Pro | 头戴 | Diva 系同代，见下行 |
+     * | 8 | FIIL Diva | 头戴 | 新浪众测：「购买过 FIIL 家的头戴式无线降噪耳机 Diva」 |
+     * | 46 | FIIL Key Max | 头戴 | IT之家：「上架了 FIIL Key Max 深度主动降噪**头戴式**蓝牙耳机」；52audio 拆解报告标题亦为「FIIL Key Max **头戴式**降噪耳机」 |
+     * | 247 | FIIL Diva2 | 头戴 | Diva 系 |
+     * | 250 | FIIL Diva2 Pro | 头戴 | Diva 系 |
+     *
+     * 其余全部不是头戴：CC 系（21/28/30/37/39/51）、Key 系（38/41/49）、
+     * T 系（17/22/26/27/29/35）、CG 系（31/33）都是真无线入耳/半入耳，
+     * GS 系（43/45/48）与 Atom（47）是开放式，均按入耳形态出图。
+     *
+     * ## 为什么不能靠图片自动判形态
+     *
+     * 实测官方产品图的 alpha 包围盒宽高比：`key_max`(头戴) 0.90、
+     * `cc`(入耳) 0.83、`diva`(头戴) 0.91 —— 三者几乎相同，规则完全分不开；
+     * `t1_xs`/`t1_lite` 是满幅不透明图（bbox 等于整图），更是毫无信息量。
+     * 对称性也不行：`diva`/`wireless` 对称度 1.00，但 `key_max` 只有 0.40，
+     * 而它是**侧面 3/4 视角**的头戴式，与入耳的 `key`(0.44) 撞在同一区间。
+     *
+     * ⚠️ F042（Aviator）是**音箱**不是耳机，故意不列入。
+     */
+    private val HEADPHONE_EAR_TYPES: Set<Int> = setOf(2, 5, 8, 46, 247, 250)
+
+    /**
+     * 该型号是不是头戴式耳机。
+     *
+     * 融合设备中心据此在「小米官方头戴式图标」与「小米官方入耳式图标」之间二选一；
+     * 未知型号（`earType <= 0`）一律按入耳式处理 —— 那是系统默认形态，
+     * 猜错成头戴式的视觉违和感远大于猜错成入耳式。
+     */
+    fun isHeadphones(earType: Int): Boolean = earType in HEADPHONE_EAR_TYPES
+
     /** 走 BLE 私有 GATT（Airoha RACE 或 FIILPeripheral）的新机型，当前模块不接管。 */
     private val BLE_ONLY: Set<Int> = setOf(39, 40, 42)
 

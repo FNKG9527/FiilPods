@@ -69,6 +69,17 @@ class MiLinkServiceHook(
         private const val CLS_DISCOVERY_KT = "com.miui.headset.runtime.DiscoveryKt"
 
         /**
+         * 融合设备中心的协议客户端。
+         *
+         * `com.miui.circulate.api.protocol.bluetooth.BluetoothServiceClient`
+         * 实际落在 `smali_classes2`，与 `com.miui.headset.*`（在
+         * `smali_classes3`/`classes3.dex`）**不是同一个 dex**，但同属
+         * `com.milink.service` 进程、同一个 classLoader，所以照样能 hook 到。
+         */
+        private const val CLS_BT_SERVICE_CLIENT =
+            "com.miui.circulate.api.protocol.bluetooth.BluetoothServiceClient"
+
+        /**
          * 属性变更通知的投递延迟，对齐官方
          * `AncBatteryController.OP_UPDATE_DELAY = 25`（`:26`）。
          *
@@ -152,6 +163,15 @@ class MiLinkServiceHook(
         const val SPATIAL_OFF = 0
         const val SPATIAL_FIXED = 1
         const val SPATIAL_HEAD_TRACKING = 2
+
+        /**
+         * `BluetoothServiceClient.getHeadsetType` 的返回值 → 官方图标。
+         *
+         * 完整映射见 `com/miui/circulate/world/utils/a0.smali:7` 的
+         * `packed-switch`；这里只定义本项目用到的两个。
+         */
+        private const val HEADSET_TYPE_NORMAL = 3
+        private const val HEADSET_TYPE_HEADPHONES = 7
 
         /** 同伴 [MiLinkSpatialAudioHook] 需要访问宿主状态，用单例回引。 */
         @Volatile
@@ -325,6 +345,47 @@ class MiLinkServiceHook(
         hookDeviceResult(CLS_PROFILE_CONTEXT, "getAudioSpatialEffectState") { miLinkSpatialMode() }
         hookAddressResult(CLS_PROFILE_CONTEXT, "getSwitchState") { miLinkSwitchState() }
 
+        // ------------------------------------------------------------------
+        // 融合设备中心的**卡片图标形态**。
+        //
+        // `BluetoothServiceClient.getHeadsetType(BluetoothDevice)`（18.2 smali
+        // `smali_classes2/.../BluetoothServiceClient.smali:964`，`private`）是
+        // 图标形态的唯一来源，方法体只有三段：
+        //
+        // ```smali
+        // iget-object v0, p0, ...->mxBluetoothManager:LMxBluetoothManager;   // :968
+        // if-eqz v0, :cond_1
+        // invoke-virtual {v0, p1}, ...MxBluetoothManager;->getDeviceId(BluetoothDevice)String
+        // invoke-static {v0}, Lvg/a;->b(String)I        // 小米自家 6 位编码 → 形态
+        // return p1
+        // :cond_1  const/4 p1, 0x0 ; return p1          // 兜底 0
+        // ```
+        //
+        // 我们把 `getDeviceId` 换成了 `fakeDeviceId()`（用户可自定义，默认
+        // `"01010607"`），它命不中 `vg/a` 的任何私有编码 → 永远返回 0 →
+        // 卡片图标恒为 `circulate_headset_icon`（普通入耳）。
+        //
+        // 图标映射在 `com/miui/circulate/world/utils/a0.smali:7` 的
+        // `packed-switch` 里（值来自 `CirculateServiceInfo.setHeadsetType`
+        // 写入的 `"headset_type"` extra，`CircleServiceInfo.smali:557` 已核实）：
+        //
+        // ```
+        // 2 → circulate_single_battery_headset_icon   8 → a0.b(headset_id) 按型号
+        // 3 → circulate_headset_icon（普通）           9 → a0.b(headset_id)
+        // 4 → circulate_device_headset_openwear        默认 → circulate_headset_icon
+        // 5 → circulate_airpods_headset_icon
+        // 6 → circulate_airpods_headphones_headset_icon
+        // 7 → circulate_device_headset_headphones      ← 头戴式
+        // ```
+        //
+        // 所以只需按 FIIL 型号的真实形态给 7 或 3：
+        // 头戴（Diva 全系 / Wireless / Key Max）→ 7，其余 → 3。
+        // 回 3 而**不是** 0，是因为 0 会落到 `:pswitch_0` 的默认分支，
+        // 虽然图标同样是 `circulate_headset_icon`，但 3 是官方对「普通耳机」
+        // 的显式取值，语义更准（也避开 packed-switch 的 0x2/0x3 空洞）。
+        // ------------------------------------------------------------------
+        hookDeviceResult(CLS_BT_SERVICE_CLIENT, "getHeadsetType") { headsetTypeIcon() }
+
         hookDeviceResult(CLS_ANC_BATTERY, "getDeviceId") { fakeDeviceId() }
         hookDeviceResult(CLS_ANC_BATTERY, "getAncState") { miLinkAncState() }
         hookDeviceResult(CLS_ANC_BATTERY, "getBatteryLevelCache") { miLinkBatteryLevels() }
@@ -366,6 +427,28 @@ class MiLinkServiceHook(
     fun fakeDeviceId(): String = runCatching {
         ConfigManager.fakeDeviceId()
     }.getOrDefault(FiilConfig.FAKE_DEVICE_ID)
+
+    /**
+     * `BluetoothServiceClient.getHeadsetType(BluetoothDevice)` 的返回值 ——
+     * 也就是卡片**图标形态**的选择码。
+     *
+     * 取值语义逐字来自 `com/miui/circulate/world/utils/a0.smali:7` 的
+     * `packed-switch`（见 [hookHeadsetRuntimeDisplay] 里的完整映射表）。
+     * 我们只用到两个：
+     *  - [HEADSET_TYPE_HEADPHONES] = 7 → `circulate_device_headset_headphones`
+     *  - [HEADSET_TYPE_NORMAL] = 3 → `circulate_headset_icon`
+     *
+     * 形态判定交给 [FiilModels.isHeadphones]，纯按 earType 查表，
+     * 不猜、不做模糊匹配；读不到 earType 时按普通耳机处理。
+     */
+    private fun headsetTypeIcon(): Int {
+        loadState()
+        return if (FiilModels.isHeadphones(earType)) {
+            HEADSET_TYPE_HEADPHONES
+        } else {
+            HEADSET_TYPE_NORMAL
+        }
+    }
 
     /** hook 形如 `xxx(BluetoothDevice)` 的查询方法，命中我们的耳机时改写返回值。 */
     fun hookDeviceResult(className: String, methodName: String, result: () -> Any) {

@@ -7,6 +7,92 @@
 
 ---
 
+## [2.2.3] - 2026-10-31
+
+修「图标不跟着耳机型号走」。两处独立的成因，都在**我们自己的 hook 上**，
+跟小米官方的渲染逻辑无关：融合中心是把 FIIL 的假设备 ID 丢进了小米自家的编码判定表，
+命不中恒返回 0；通知栏则是**根本没拿到 earType**，只能画通用图。
+
+### Fixed
+
+- **融合设备中心：不管接什么型号，图标永远是「普通蓝牙耳机」**
+
+  链路两段，都在 `com.milink.service` 里：
+
+  `BluetoothServiceClient.getHeadsetType(BluetoothDevice)`（`smali_classes2`，`:964`）
+  方法体只有三句：取 `mxBluetoothManager` → `getDeviceId(device)` → `vg/a.b(String)` 拿 headset_type。
+  而 `mxBluetoothManager.getDeviceId()` **早已被本项目 hook 成 `fakeDeviceId()`**
+  （「伪装耳机型号」功能要用它），默认返回 `"01010607"`。
+
+  `vg/a.b(String)` 是按**小米自家 6 位设备编码**做判定的：`n()`→7 头戴、`d()`→5、
+  `e()`→6、`r()`→4、`s()`→2、`i()`→3、`k()`→8、`w()`→9，**全不命中 → 0**。
+  `"01010607"` 是 FIIL 的假 ID，一条都不命中，所以恒返回 **0**。
+
+  然后 `smali_classes3/.../world/utils/a0.smali:7` 的 `a(CirculateDeviceInfo)` 按
+  `getInt("headset_type", 0)` 做 packed-switch：只有 **case 7** 才是
+  `circulate_device_headset_headphones`（头戴式）；0 落到默认分支 → `circulate_headset_icon`。
+  **这就是「融合中心永远是普通耳机图标」的完整成因。**
+
+  修法：不伪造小米编码（那是小米的身份空间，改了会连带影响 `vg/a` 的其它判定，
+  且用户还能自己改假 ID，一改又落空），改为直接挂
+  `hookDeviceResult(CLS_BT_SERVICE_CLIENT, "getHeadsetType") { headsetTypeIcon() }`，
+  按真实 earType 返回 **7（头戴）/ 3（普通）**，图标由官方 `a0.a()` 自己选 ——
+  **用的就是小米官方那两张图**，与小米自家设备同一渲染路径，不会有「自己画一个像官方的图」的失真。
+
+- **通知栏常驻卡片：右侧耳机图换型号也不变**
+
+  `MiBluetoothToastHook.updateNotification()` 取图走的是
+  `PodImageLoader.loadBoxBitmap()`，而它只有「用户自定义图 or `img_box.png`」两级，
+  **没有型号这一级** —— 所以接 Diva、Key Max 还是 CC nano，右侧永远是同一张通用盒子图。
+
+  更根本的是**通知进程拿不到 earType**：`updateNotification` 跑在 `com.xiaomi.bluetooth`，
+  而 `earType` 是蓝牙进程 `FiilRfcommController` 的实例字段，两个进程不共享内存；
+  `ACTION_PODS_BATTERY_CHANGED` 的 extras 里也从来没有这个键。
+
+  修法三条：
+  1. `pods/FiilAction.kt` 新增契约 `EXTRA_EAR_TYPE = "ear_type"`；
+  2. `FiilRfcommController.publishState()` 把它随广播发出，
+     并把去重键从 `"$left/$right/$case"` 改成 `"$left/$right/$case/$earType"`
+     —— **这一步必须做**，否则「换同型号的另一台」或「多点切到同型号设备」时
+     电量数值相同会被去重吞掉，新图案永远发不出去；
+  3. 新增 `PodImageLoader.loadModelBoxBitmap()`，三级回落
+     **自定义图 → 该型号官方产品图 → 通用图**；`earType <= 0` 时**跳过**型号那一级
+     （`drawableOf()` 对未收录型号回落 `fiil_unknow`，那是「官方也不认识」的意思，
+     摆进通知栏会让人误判设备）。
+
+### Added
+
+- `FiilModels.HEADPHONE_EAR_TYPES = setOf(2, 5, 8, 46, 247, 250)` 与
+  `FiilModels.isHeadphones(earType)`。判定依据见文档 17.4 —— **第一版实现漏了
+  Key Max（46）**，那恰好是用户手上那台，于是「改了没效果」。现在有测试钉死全集。
+
+### Changed
+
+- `versionCode` 6 → 7，`versionName` 2.2.2 → 2.2.3
+- 应用名保持 `FiilPods 2.2 Fix` 不变
+- 文档 `docs/RELEASE_v2.2.2.md` → `docs/RELEASE_v2.2.3.md`，新增第十七节
+  （两处成因的 smali 取证、为何不改 `fakeDeviceId`、六款头戴型号表、
+  三级回落的取样顺序、状态栏小图标为何故意不改），回归清单从 57 条扩到 64 条
+  （58–64 专验图标，其中 63 是「装完必须关开蓝牙」，64 说明小图标不改是故意的）
+- 新增 `HeadphoneFormFactorTest`（7 项）：把 6 款头戴钉死为全集
+  （`(0..300).filter { isHeadphones(it) }` 必须**恰好等于** `setOf(2,5,8,46,247,250)`），
+  并断言这 6 款都有官方产品图。少一个多一个都会红
+
+### Known
+
+- **状态栏最左侧的小图标仍是系统蓝牙图标，这是故意的**。Android 状态栏图标
+  只取位图的 alpha 通道做单色着色；实测 31 张型号图里 27 张带 alpha，但都是
+  「不透明彩色主体 + 透明背景」的产品照，压成剪影后 24dp 下就是认不出的色块
+  （另外 4 张 `t1_lite`/`t1_x`/`t1_xs`/`fiil_unknow` 干脆没有 alpha，传进去是实心方块）。
+  要按型号区分必须另做单色矢量剪影，不在本次范围。用户实际看到的是**大图**
+  （`FocusNotification` 的 `iconTextInfo` / 岛），它已经跟着型号走了。
+- 本轮构建遇到 R8 内存不足（`clean + test + assembleDebug + assembleRelease` 串行时
+  `minifyReleaseWithR8` 两次因 G1 虚拟空间 mmap 失败崩溃，当时系统仅剩 ~2GB 空闲）。
+  改为分步执行（test `-Xmx1400m` → assembleRelease `-Xmx1500m` → assembleDebug）后全部成功。
+  非代码问题，是构建机内存约束。
+
+---
+
 ## [2.2.2] - 2026-10-31
 
 修「耳机详情页根本看不到 LDAC 开关」。**这不是 UI 遗漏，是一个自锁**：

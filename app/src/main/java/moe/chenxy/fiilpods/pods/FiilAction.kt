@@ -96,6 +96,16 @@ object FiilAction {
     /** 协议族标记（Boolean：true = Mate 帧，F045~F053）。 */
     const val EXTRA_IS_MATE = "is_mate"
 
+    /**
+     * 当前连接耳机的型号码（Int，`FiilModels` 的 earType；未知为 -1 或缺省）。
+     *
+     * 加它是因为常驻通知的**耳机图案要跟着型号走**：通知进程
+     * （`com.xiaomi.bluetooth`）与蓝牙进程不是同一个，拿不到控制器里的
+     * `earType`，只能靠广播带过来。只加在
+     * [ACTION_PODS_BATTERY_CHANGED] 上 —— 那是通知唯一的数据来源。
+     */
+    const val EXTRA_EAR_TYPE = "ear_type"
+
     /** 需要接收状态广播的系统包。 */
     val STATUS_TARGETS = listOf(
         "com.android.settings",

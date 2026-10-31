@@ -35,8 +35,18 @@ android {
         //   不成立，开关永不渲染。这是个死锁：不显示就没入口打开，不打开就永远不显示。
         //   现在「是否显示」改为按 earType 能力判（FiilModels.supportsLdac），
         //   开关状态读耳机侧 143/142，点击时双管齐下（耳机侧 cmdId=13 + 手机侧 A2DP）。
-        versionCode = 6
-        versionName = "2.2.2"
+        // v2.2.3：修「图标不跟着耳机型号走」。
+        //   ① 融合设备中心：`BluetoothServiceClient.getHeadsetType(BluetoothDevice)`
+        //      把 FIIL 的 fakeDeviceId("01010607") 丢给 `vg/a.b(String)`，那是小米自家
+        //      6 位编码空间，命不中 → 恒返回 0 → 卡片图标恒为普通入耳图。改为按
+        //      earType 的真实形态返回 7（头戴）/3（普通），图标由官方 `a0.a()` 的
+        //      packed-switch 选 `circulate_device_headset_headphones` / `circulate_headset_icon`。
+        //   ② 通知栏：`ACTION_PODS_BATTERY_CHANGED` 补 `EXTRA_EAR_TYPE`，
+        //      焦点通知大图改走 `PodImageLoader.loadModelBoxBitmap`（自定义图 →
+        //      型号官方图 → 通用图）。之前只有「自定义 or 通用盒子图」，所以接什么
+        //      型号都长一样。
+        versionCode = 7
+        versionName = "2.2.3"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 

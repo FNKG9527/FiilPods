@@ -289,12 +289,14 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
                             val snapshot = BatterySnapshot.fromExtras(intent) ?: return
                             val name = intent.getStringExtra(FiilAction.EXTRA_DEVICE_NAME) ?: "FIIL"
                             val address = intent.getStringExtra(FiilAction.EXTRA_ADDRESS).orEmpty()
+                            // 型号由蓝牙进程随电量一起带过来；缺省 -1 表示「这一版还没读到型号」。
+                            val earType = intent.getIntExtra(FiilAction.EXTRA_EAR_TYPE, -1)
                             appendLog(
-                                "battery rx name=$name addr=${address.take(8)}… " +
+                                "battery rx name=$name addr=${address.take(8)}… ear=$earType " +
                                     "L=${snapshot.left?.battery} R=${snapshot.right?.battery} " +
                                     "C=${snapshot.case?.battery}",
                             )
-                            onBatteryChanged(c ?: appContext, snapshot, name, address)
+                            onBatteryChanged(c ?: appContext, snapshot, name, address, earType)
                         }
                         FiilAction.ACTION_PODS_CONNECTED -> {
                             val name = intent.getStringExtra(FiilAction.EXTRA_DEVICE_NAME) ?: "FIIL"
@@ -337,7 +339,13 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
         }
     }
 
-    private fun onBatteryChanged(ctx: Context?, snapshot: BatterySnapshot, name: String, address: String) {
+    private fun onBatteryChanged(
+        ctx: Context?,
+        snapshot: BatterySnapshot,
+        name: String,
+        address: String,
+        earType: Int = -1,
+    ) {
         if (ctx == null) return
         // 「焦点通知」总开关在这里生效：关掉时既不弹提示、也不刷常驻通知，
         // 还要把已经显示的常驻通知撤掉（否则用户关掉开关后那条通知会一直挂着）。
@@ -381,7 +389,7 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
 
             else -> Unit
         }
-        updateNotification(ctx, snapshot, name, address)
+        updateNotification(ctx, snapshot, name, address, earType)
     }
 
     /**
@@ -641,7 +649,13 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
      * @param name     设备显示名
      * @param address  设备 MAC；为空时说明状态广播里没有地址，直接放弃（无法组渠道 id）
      */
-    private fun updateNotification(ctx: Context, snapshot: BatterySnapshot, name: String, address: String) {
+    private fun updateNotification(
+        ctx: Context,
+        snapshot: BatterySnapshot,
+        name: String,
+        address: String,
+        earType: Int = -1,
+    ) {
         if (address.isEmpty()) {
             logW("update notification skipped: empty address")
             return
@@ -668,14 +682,20 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
             }
             val content = if (lines.isEmpty()) "未连接" else lines.joinToString("  ")
 
-            // 焦点通知右侧要一张设备图：优先用户自定义的充电盒图，回落到模块内置 PNG。
+            // 焦点通知右侧要一张设备图，按优先级三级回落（详见 loadModelBoxBitmap）：
+            //  1. 用户给这台耳机设的自定义图 → 2. 该型号的官方产品图 → 3. 通用 img_box。
+            //
+            // 之前只取 `loadBoxBitmap`（= 自定义 or 通用图），没有第 2 级，所以
+            // 不管接的是 Diva、Key Max 还是 CC nano，通知栏里永远是同一张通用盒子图。
+            // earType 由蓝牙进程随 ACTION_PODS_BATTERY_CHANGED 一起发过来。
+            //
             // 注意必须用**模块**的 resources 解码（hook 跑在宿主进程里，
             // ctx.resources 是宿主资源表，拿不到 moe.chenxy.fiilpods 的 drawable）。
             val moduleContext = runCatching {
                 ctx.createPackageContext(FiilConfig.MODULE_PACKAGE, Context.CONTEXT_IGNORE_SECURITY)
             }.getOrNull()
             val headsetBitmap = runCatching {
-                PodImageLoader.loadBoxBitmap(ctx, prefs, address)
+                PodImageLoader.loadModelBoxBitmap(ctx, prefs, address, earType)
             }.getOrNull()
                 ?: moduleContext?.let {
                     runCatching { BitmapFactory.decodeResource(it.resources, R.drawable.img_box) }.getOrNull()
@@ -760,6 +780,16 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
             )
 
             val builder = Notification.Builder(ctx, channelId)
+                // 状态栏小图标保持系统蓝牙图形，**不**换成型号图。
+                //
+                // Android 的状态栏图标只取位图的 alpha 通道做单一着色，彩色主体会被
+                // 压成一整块实心色块。实测 31 张型号图里 27 张带 alpha，但它们是
+                // 「不透明主体 + 透明背景」的彩色产品照，压成剪影后 24dp 下就是一团
+                // 认不出的色块，比系统蓝牙图标更难辨识。要按型号区分小图标必须另做
+                // 一套单色矢量剪影，不属于本次改动的范围。
+                //
+                // 随型号变化的图在**大图**（headsetBitmap → FocusNotification 的
+                // iconTextInfo / island）上生效，那才是用户在通知卡片里看到的那张。
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setWhen(0L)
                 .setTicker(name)
