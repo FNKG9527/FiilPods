@@ -16,14 +16,26 @@ dist/
 
 | 版本 | 产物 | 大小 | 下载 |
 |---|---|---|---|
-| **v2.1.0**（最新） | `FiilPods-v2.1.0-release.apk` | 3.88 MB | [Release v2.1.0](https://github.com/FNKG9527/FiilPods/releases/tag/v2.1.0) |
-| v2.1.0 | `FiilPods-v2.1.0-debug.apk` | 34.06 MB | 同上（排查问题用，含完整日志） |
+| **v2.2.1**（最新） | `FiilPods-v2.2.1-release.apk` | 4.33 MB | [Release v2.2.1](https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.1) |
+| v2.2.1 | `FiilPods-v2.2.1-debug.apk` | 34.02 MB | 同上（排查问题用，含完整日志） |
+| v2.2.0 | `FiilPods-v2.2.0-release.apk` | 4.36 MB | [Release v2.2.0](https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.0) |
+| v2.2.0 | `FiilPods-v2.2.0-debug.apk` | 34.15 MB | 同上 |
+| v2.1.0 | `FiilPods-v2.1.0-release.apk` | 3.88 MB | [Release v2.1.0](https://github.com/FNKG9527/FiilPods/releases/tag/v2.1.0) |
+| v2.1.0 | `FiilPods-v2.1.0-debug.apk` | 34.06 MB | 同上 |
 | v2.0.0 | `FiilPods-v2.0.0-release.apk` | 3.78 MB | [Release v2.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v2.0.0) |
 | v2.0.0 | `FiilPods-v2.0.0-debug.apk` | 34.04 MB | 同上 |
 | v1.0.0 | `FiilPods-v1.0.0-release.apk` | 3.77 MB | [Release v1.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v1.0.0) |
 | v1.0.0 | `FiilPods-v1.0.0-debug.apk` | 46.20 MB | 同上 |
 
-三个版本的**包名与签名完全一致**（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`），可直接覆盖安装，无需卸载。
+五个版本的**包名与签名完全一致**（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`），可直接覆盖安装，无需卸载。
+
+### 2.2.x 的 SHA-256
+
+| 版本 | release | debug |
+|---|---|---|
+| v2.2.1 | `BA45F8140C37CC4406BAC0D713F619B28B58AF2E35AA12C7B4533E77FE6D2FAF` | `D7EF9DFF19E3AA77EA1A7C779B5BF8326E2DF2FA1DE6E7F721E605455CEEC3E1` |
+| v2.2.0 | `BA6E4FDB75A4111F816498D053E45C09A2FC322ECC08835E6A0560952EC5477D` | `644B14FE58E48C324AC5CD9A8081E90430778D64D01FD4EF13E9F6833FECB040` |
+
 
 ## 为什么保留 v1-src
 

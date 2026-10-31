@@ -10,7 +10,7 @@
 
 <div align="center">
 
-![Release](https://img.shields.io/badge/Release-2.1.0-4B8BF5?style=flat-square)
+![Release](https://img.shields.io/badge/Release-2.2.1-4B8BF5?style=flat-square)
 ![Downloads](https://img.shields.io/github/downloads/FNKG9527/FiilPods/total?style=flat-square&color=34C759)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Framework](https://img.shields.io/badge/Framework-LSPosed-FF6B6B?style=flat-square)
@@ -49,7 +49,7 @@
 | 📡 **[协议字节表](docs/PROTOCOL_FIIL.md)** | UUID 全表、GAIA 190 条命令、Mate cid/cmd 对照 |
 | 🧪 **[真机回归记录](docs/DEVICE_TEST.md)** | 19 项用例的实测结果 |
 | 🐞 **[缺陷根因档案](docs/IMPLEMENTATION.md#七相关文档)** | 九处连接根因、跨进程闪退、模式切换失效、v2.1 三处修复 |
-| 📝 **[更新日志](CHANGELOG.md)** | 1.0.0 → 2.1.0 的完整变更 |
+| 📝 **[更新日志](CHANGELOG.md)** | 1.0.0 → 2.2.1 的完整变更 |
 
 ---
 
@@ -106,9 +106,9 @@
 
 **1. 安装 APK**
 
-下载 [Release 页面](https://github.com/FNKG9527/FiilPods/releases/latest) 的 `FiilPods-v2.1.0-release.apk`，直接安装（日常使用装 release 版即可，`debug` 版体积更大但带完整日志）。
+下载 [Release 页面](https://github.com/FNKG9527/FiilPods/releases/latest) 的 `FiilPods-v2.2.1-release.apk`，直接安装（日常使用装 release 版即可，`debug` 版体积更大但带完整日志）。
 
-> 📦 三个版本（1.0.0 / 2.0.0 / 2.1.0）包名与签名一致，可直接覆盖安装，无需卸载。历史版本见 [Releases](https://github.com/FNKG9527/FiilPods/releases)。
+> 📦 五个版本（1.0.0 / 2.0.0 / 2.1.0 / 2.2.0 / 2.2.1）包名与签名一致，可直接覆盖安装，无需卸载。历史版本见 [Releases](https://github.com/FNKG9527/FiilPods/releases)。
 
 **2. 在 LSPosed 中启用**
 
@@ -218,7 +218,7 @@ Mate 机型建立 RFCOMM 链路后，**必须先发一条解锁帧**，否则耳
 | 🔍 [诊断档案](docs/IMPLEMENTATION.md#七相关文档) | 九处连接根因、跨进程闪退、模式切换失效、v2.1 三处修复 |
 | 🏗 [架构分析](docs/ARCH_OPPOPODS.md) | OppoPods 架构拆解（UI 移植依据） |
 | ✅ [验收报告](docs/ACCEPTANCE_REPORT.md) | 6 角色联合结项验收（72/100，「可内测」） |
-| 📝 [更新日志](CHANGELOG.md) | 1.0.0 → 2.1.0 完整变更 |
+| 📝 [更新日志](CHANGELOG.md) | 1.0.0 → 2.2.1 完整变更 |
 | 🤝 [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md) | 提 PR 与漏洞上报 |
 
 ---
