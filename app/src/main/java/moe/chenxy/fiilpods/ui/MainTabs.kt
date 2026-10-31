@@ -143,7 +143,6 @@ internal fun MainTabsScaffold(
     fakeDeviceId: MutableState<String>,
     onFakeDeviceIdChange: (String) -> Unit,
     onOpenTheme: () -> Unit,
-    onOpenLeAudio: () -> Unit,
     onOpenAbout: () -> Unit,
     showRestartScopeDialog: Boolean,
     restartingScopes: Boolean,
@@ -308,7 +307,6 @@ internal fun MainTabsScaffold(
                         fakeDeviceId = fakeDeviceId,
                         onFakeDeviceIdChange = onFakeDeviceIdChange,
                         onOpenTheme = onOpenTheme,
-                        onOpenLeAudio = onOpenLeAudio,
                         onOpenAbout = onOpenAbout,
                     )
                 }
@@ -562,7 +560,6 @@ private fun SettingsTabPage(
     fakeDeviceId: MutableState<String>,
     onFakeDeviceIdChange: (String) -> Unit,
     onOpenTheme: () -> Unit,
-    onOpenLeAudio: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
@@ -606,7 +603,6 @@ private fun SettingsTabPage(
             fakeDeviceId = fakeDeviceId,
             onFakeDeviceIdChange = onFakeDeviceIdChange,
             onOpenTheme = onOpenTheme,
-            onOpenLeAudio = onOpenLeAudio,
             onOpenAbout = onOpenAbout,
         )
     }

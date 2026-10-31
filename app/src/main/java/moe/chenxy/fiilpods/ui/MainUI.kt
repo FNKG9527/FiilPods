@@ -59,7 +59,6 @@ import moe.chenxy.fiilpods.ui.pages.AboutPage
 import moe.chenxy.fiilpods.ui.pages.EqualizerPage
 import moe.chenxy.fiilpods.ui.pages.RfcommDebugPage
 import moe.chenxy.fiilpods.ui.pages.ThemeSettingsPage
-import moe.chenxy.fiilpods.ui.pages.LeAudioSettingsPage
 import moe.chenxy.fiilpods.utils.RootManager
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.PodParams
@@ -93,8 +92,6 @@ sealed interface Screen : NavKey {
     data object About : Screen
     @Serializable
     data object Theme : Screen
-    @Serializable
-    data object LeAudio : Screen
     @Serializable
     data object Equalizer : Screen
     @Serializable
@@ -181,7 +178,6 @@ fun MainUI(
     val fakeDeviceId = remember { mutableStateOf(appConfig.fakeDeviceId) }
     val islandMode = remember { mutableStateOf(appConfig.islandMode) }
     val focusNotification = remember { mutableStateOf(appConfig.focusNotification) }
-    val leAudioConfig = remember { mutableStateOf(appConfig.leAudio) }
     val islandShowTimings = remember { mutableStateOf(appConfig.islandShowTimings) }
     val spatialAudioMode = remember { mutableStateOf(prefs.getInt("spatial_audio_mode", ConfigManager.SPATIAL_AUDIO_OFF)) }
     val eqPreset = remember { mutableStateOf(-1) }
@@ -963,7 +959,6 @@ fun MainUI(
                     broadcastConfigChanged(context, "com.xiaomi.bluetooth")
                 },
                 onOpenTheme = { backStack.add(Screen.Theme) },
-                onOpenLeAudio = { backStack.add(Screen.LeAudio) },
                 onOpenAbout = { backStack.add(Screen.About) },
                 showRestartScopeDialog = showRestartScopeDialog,
                 restartingScopes = restartingScopes,
@@ -1048,40 +1043,6 @@ fun MainUI(
                         onBlurBottomBarChange = onBlurBottomBarChange,
                     )
                 }
-            }
-        }
-        entry<Screen.LeAudio> {
-            val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = stringResource(R.string.le_audio_title),
-                        largeTitle = stringResource(R.string.le_audio_title),
-                        scrollBehavior = scrollBehavior,
-                        navigationIcon = {
-                            IconButton(onClick = { backStack.removeLast() }) {
-                                Icon(imageVector = MiuixIcons.Back, contentDescription = "Back")
-                            }
-                        },
-                    )
-                },
-            ) { padding ->
-                LeAudioSettingsPage(
-                    modifier = Modifier
-                        .background(backgroundColor)
-                        .overScrollVertical()
-                        .nestedScroll(scrollBehavior.nestedScrollConnection),
-                    contentPadding = PaddingValues(
-                        top = padding.calculateTopPadding(),
-                        bottom = pageBottomContentPadding,
-                    ),
-                    config = leAudioConfig.value,
-                    onConfigChange = {
-                        leAudioConfig.value = it.normalized()
-                        ConfigManager.updateLeAudio(prefs, xposedService, leAudioConfig.value)
-                        broadcastConfigChanged(context, "com.android.bluetooth")
-                    },
-                )
             }
         }
         entry<Screen.Equalizer> {

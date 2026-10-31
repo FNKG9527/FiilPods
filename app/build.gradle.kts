@@ -20,17 +20,15 @@ android {
         //   ① 融合设备中心切模式后图标要再点一次才更新（回写 AncBatteryModel 字段）
         //   ② 模块页误报「模块服务未响应」（UI_INIT/REFRESH 时回发 ALIVE 心跳）
         //   ③ 设置页开启焦点通知后通知栏无通知（HookEntry 注入远端 prefs + 模块自制超级岛接线）
-        // v2.2.0：在 v2.1.0 基线上重做用户提名的五个实机 Bug，并补两项新增能力 ——
-        //   ① 控制页 LDAC 开关（读 A2dpService 的 codec 状态，写 setCodecConfigPreference）
-        //   ② 焦点通知 / 通知栏卡片（HyperOS 4 上 MiuiBluetoothNotification 的三条注册通道）
-        //   ③ 超级岛电量（FocusIslandUtil 收令牌，避免连续展示时被上一条 4s 定时撤岛打断）
-        //   ④ 融合中心切 ANC 后 UI 不刷新（setAncStateBlock 返回 100，通知投递到
-        //      DiscoveryKt.getSYSTEM_BROADCAST_HANDLER 的 system_broadcast 线程）
-        //   ⑤ 原生小米耳机页「更多设置」按钮无效（SettingsHook 的装箱参数类型修正）
-        //   另：伪装耳机型号保持可编辑并真正注入；主页按连接型号显示官方产品图；
-        //   连接/断开自激回路的刹车机制（连续失败 3 次进冷却，指数退避封顶 15 分钟）。
-        versionCode = 4
-        versionName = "2.2.0"
+        // v2.2.1：删除从 OppoPods 复制过来的「OPPO LE Audio」设置页。
+        //   该页在 fiil_mod 里只有 UI 壳（LeAudioSettingsPage / LeAudioConfig /
+        //   LeAudioDevicesDialog + 84 条字符串），hook 侧一行实现都没有 ——
+        //   OppoPods 的 504 行 LeAudioConnectionHook 与 119 行 OppoLeAudioHook 从未移植。
+        //   FIIL 走 SPP/RFCOMM MATE 协议，与 OPPO 的 VDID/VDSF/OESF/VDSP 私有 AT
+        //   握手无关，所以这页对 FIIL 耳机纯属空转。整页连同入口、导航、配置字段、
+        //   字符串资源一并移除。版本号保持 2.2.x 线，仅递增 patch。
+        versionCode = 5
+        versionName = "2.2.1"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 
