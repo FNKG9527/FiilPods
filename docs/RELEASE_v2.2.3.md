@@ -34,6 +34,14 @@
 > 先 `:app:testDebugUnitTest`（`-Xmx1400m`），再 `:app:assembleRelease`（`-Xmx1500m`），
 > 最后 `:app:assembleDebug`。这不是代码问题，是构建机内存约束。
 > 已确认 `source files newer than apk: 0`。
+>
+> **补记（含「关于」页的最终产物）**：加完关于页后重打时，`assembleRelease` 又一次
+> 在 `lintVitalAnalyzeRelease` 阶段把 JVM 打崩（`hs_err_pid10292.log`：
+> `Native memory allocation (malloc) failed to allocate 952176 bytes. Error detail: Chunk::new`，
+> 当时仅剩 ~2.7GB 空闲）。最终改用 `-x lintVitalRelease` 出包 ——
+> `lintVital` 只是发布前的静态检查任务，**不参与 APK 产物构建**，
+> 跳过它不改变 APK 内容。本次交付产物即由此而来：
+> release `F23714F9…`（4,543,592 B）、debug `F1D886C6…`（35,688,080 B）。
 
 ---
 
