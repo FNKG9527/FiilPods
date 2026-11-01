@@ -1248,14 +1248,26 @@ private fun sendBluetoothModuleBroadcast(context: Context, action: String) {
     }
 }
 
+/**
+ * 桌面图标的组件标识。
+ *
+ * ⚠️ v3.1.0 之后 applicationId 与 Kotlin 包名**不再相同**：
+ * applicationId = `io.github.fnkg9527.fiilpods`，而类全名仍是
+ * `moe.chenxy.fiilpods.LauncherActivity`（namespace 没动）。
+ * 所以这里必须用两参构造 `ComponentName(package, class)` 把两边分别写清楚 ——
+ * 单参的 `ComponentName(context, cls)` 虽然也能工作，但看不出哪个是包名，容易被人「顺手统一」改坏。
+ */
+private fun launcherComponent(context: Context): ComponentName =
+    ComponentName(context.packageName, "moe.chenxy.fiilpods.LauncherActivity")
+
 private fun isLauncherIconHidden(context: Context): Boolean {
-    val component = ComponentName(context, "moe.chenxy.fiilpods.LauncherActivity")
+    val component = launcherComponent(context)
     val state = context.packageManager.getComponentEnabledSetting(component)
     return state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
 }
 
 private fun setLauncherIconHidden(context: Context, hidden: Boolean) {
-    val component = ComponentName(context, "moe.chenxy.fiilpods.LauncherActivity")
+    val component = launcherComponent(context)
     val state = if (hidden) {
         PackageManager.COMPONENT_ENABLED_STATE_DISABLED
     } else {
@@ -1269,7 +1281,7 @@ private fun setLauncherIconHidden(context: Context, hidden: Boolean) {
  *
  * ⚠️ 这里必须**同时**发两个 action：
  * - [OppoPodsAction.ACTION_CONFIG_CHANGED]（`chen.action.oppopods.config_changed`）
- * - [FiilAction.ACTION_CONFIG_CHANGED]（`moe.chenxy.fiilpods.action.CONFIG_CHANGED`）
+ * - [FiilAction.ACTION_CONFIG_CHANGED]（`io.github.fnkg9527.fiilpods.action.CONFIG_CHANGED`）
  *
  * 历史上两个常量各写了一半：发送端用 OppoPodsAction 的版本，而
  * `BluetoothProcessHook` / `SettingsHook` / `MiLinkServiceHook` 三个接收端注册的都是

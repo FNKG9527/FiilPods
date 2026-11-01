@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">FiilPods 3.0</string>
+    <string name="app_name">FiilPods 3.1</string>
     <string name="app_subtitle">FIIL 耳机适配 HyperOS</string>
     <string name="pod_info">耳机信息</string>
     <string name="about">关于 FiilPods</string>

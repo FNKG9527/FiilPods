@@ -7,6 +7,56 @@
 
 ---
 
+## [3.1.0] - 2026-11-01
+
+**上架 LSPosed 官方模块仓库，包名随之迁移。** 功能面与 3.0.0 完全一致，没有任何 hook、
+协议或界面上的改动。这一版存在的唯一理由是：包名不迁移，模块就进不了 LSPosed 的仓库。
+
+### 为什么必须改包名
+
+LSPosed 官方仓库（[Xposed-Modules-Repo](https://github.com/Xposed-Modules-Repo)）要求
+模块的 `applicationId` 反推出来的域名必须归提交者所有——要么在该域放一条
+`lsposed-modules-repo-verification=<GitHub 用户名>` 的 TXT 记录，要么使用
+`io.github.<用户名>` 前缀。
+
+原包名 `moe.chenxy.fiilpods` 反推的域名 `chenxy.moe` 是上游 OppoPods 作者的，我们无法
+在那上面放验证记录；第一次提交（工单
+[#2392](https://github.com/Xposed-Modules-Repo/submission/issues/2392)）正是因此被判
+`invalid`。所以改用 `io.github.fnkg9527.fiilpods`，第二次提交
+（[#2394](https://github.com/Xposed-Modules-Repo/submission/issues/2394)）通过，
+模块仓库已建立：<https://github.com/Xposed-Modules-Repo/io.github.fnkg9527.fiilpods>。
+
+### Changed
+
+- `applicationId`：`moe.chenxy.fiilpods` → **`io.github.fnkg9527.fiilpods`**
+  （`namespace` 与所有 Kotlin 类名保持不变，`moe.chenxy.fiilpods.*`）。
+- 应用名：`FiilPods 3.1`；`versionCode 8 → 9`，`versionName 3.0.0 → 3.1.0`。
+- 全部 14 个模块自有 action 前缀：`moe.chenxy.fiilpods.action.*` →
+  `io.github.fnkg9527.fiilpods.action.*`。
+- `PodImageProvider` 的 authority：`…fiilpods.podimages` →
+  `io.github.fnkg9527.fiilpods.podimages`
+  （authority 全设备唯一，不换会导致新旧两版 `INSTALL_FAILED_CONFLICTING_PROVIDER`）。
+- `FiilConfig.MODULE_PACKAGE`、`PodImageLoader` 的同名常量、`OppoCompatBridge` 的
+  `setPackage(...)` 全部改读新常量，不再散落字面量。
+- 顺手改掉 fork 遗留的 `app_subtitle`（`OPPO 耳机适配 HyperOS` → `FIIL 耳机适配 HyperOS`）。
+  该字符串没有任何 Kotlin 引用，不会显示给用户。
+
+### Added
+
+- `ModulePackageTest`（4 个用例）：把 `MODULE_PACKAGE == BuildConfig.APPLICATION_ID`、
+  `AUTHORITY == "${APPLICATION_ID}.podimages"`、14 个 action 前缀、以及
+  `FiilRfcommController` 里那三个 action 常量与 `FiilAction` 的一致性钉死。
+  以后再动包名，少改一处测试就会红。
+- 模块仓库侧新增 `SUMMARY` / `SCOPE` / `SOURCE_URL` / `VERSION` / `README.md` /
+  `README_EN.md` / `LICENSE`，release tag 为 `9-3.1.0`。
+
+### 升级注意
+
+这是**新的 App 身份**，与 3.0.0 及更早版本可以并存（不同的 `applicationId`）。
+想干净升级的话：先卸载旧版，再装 3.1.0，在 LSPosed 里重新启用并勾选 4 个作用域
+（`com.android.bluetooth`、`com.xiaomi.bluetooth`、`com.milink.service`、
+`com.android.settings`），然后**关开一次蓝牙**。模块内的设置项会重置为默认值。
+
 ## [3.0.0] - 2026-11-01
 
 **FIIL 耳机原生态接入小米耳机。** 这一版不是再打一个补丁，而是把模块与系统之间的陆地线
@@ -538,7 +588,8 @@ LDAC 是耳机侧开关，而旧实现只查手机侧 A2DP 能力 —— 耳机�
 
 | 版本 | versionCode | 日期 | 关键变化 |
 |---|---|---|---|
-| **3.0.0** | **8** | 2026-11-01 | **原生态接入收口**：接入面全部对齐小米系统 API，升大版本号，应用名改 `FiilPods 3.0` |
+| **3.1.0** | **9** | 2026-11-01 | **上架 LSPosed 官方仓库**：包名迁移为 `io.github.fnkg9527.fiilpods`，功能面与 3.0.0 一致 |
+| 3.0.0 | 8 | 2026-11-01 | 原生态接入收口：接入面全部对齐小米系统 API，升大版本号，应用名改 `FiilPods 3.0` |
 | 2.2.3 | 7 | 2026-10-31 | 融合中心图标与通知栏图标跟着型号走 + 关于页补出处 |
 | 2.2.2 | 6 | 2026-10-31 | LDAC 开关（耳机侧开关自锁，第三次反馈才挖到根） |
 | 2.2.1 | 5 | 2026-10-31 | 删除 OPPO LE Audio 设置页（只有 UI 壳、零 hook 实现） |
@@ -547,13 +598,16 @@ LDAC 是耳机侧开关，而旧实现只查手机侧 A2DP 能力 —— 耳机�
 | 2.0.0 | 2 | 2026-10-26 | Mate 模式切换 6 缺陷 + 跨进程 Parcelable 闪退 + 日志抓取 |
 | 1.0.0 | 1 | 2026-10-26 | 首个可用版本，UI 对齐 OppoPods 2.2.0 |
 
-**八个版本的签名完全一致**（V2 SHA-256 `605996dc…38d34`），可以直接覆盖安装，不用卸载。
-从 2.1.0 起没有删除过任何已发布版本的数据结构，配置全部向前兼容。
+**九个版本的签名完全一致**（V2 SHA-256 `605996dc…38d34`）。从 2.1.0 起没有删除过任何已发布
+版本的数据结构，配置全部向前兼容——**但 3.1.0 是例外**：它的 `applicationId` 变了，
+与 3.0.0 及更早版本是不同的 App 身份，无法覆盖安装（可以并存）。从 3.0.0 起算的升级路径是
+「卸载旧的 → 装 3.1.0 → 重新在 LSPosed 里启用并勾选作用域 → 关开一次蓝牙」。
 
 ### 各版本 release APK 校验值
 
 | 版本 | 大小 | SHA-256 |
 |---|---|---|
+| 3.1.0 | 4,543,608 B | `E9437CC3682F8152F080B46643174CDEF57278B211752CFABEC1ACCADD4E4FE0` |
 | 3.0.0 | 4,543,588 B | `E5B3F1ECF1E71AE1DEBE7C79D8247BB3101DDD990DE19663101C470ACF771B16` |
 | 2.2.3 | 4,543,592 B | `F23714F9500DD7CE1EC801305BD0AA03DA70AC03A2821729C731423F4C89844C` |
 | 2.2.2 | 4,543,340 B | `897726447F172F307AC8F518314BA778CCFE12CFB646D3D3D806603421C3C24C` |
@@ -563,6 +617,7 @@ LDAC 是耳机侧开关，而旧实现只查手机侧 A2DP 能力 —— 耳机�
 | 2.0.0 | 3,965,095 B | 见 `dist/README.md` |
 | 1.0.0 | 3,948,715 B | 见 `dist/README.md` |
 
+[3.1.0]: https://github.com/FNKG9527/FiilPods/releases/tag/v3.1.0
 [3.0.0]: https://github.com/FNKG9527/FiilPods/releases/tag/v3.0.0
 [2.2.3]: https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.3
 [2.2.2]: https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.2

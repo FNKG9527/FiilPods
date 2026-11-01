@@ -32,9 +32,9 @@ object FiilRfcommController {
 
     private const val TAG = "FiilPods-RFCOMM"
 
-    const val ACTION_STATE = "moe.chenxy.fiilpods.action.STATE_CHANGED"
-    const val ACTION_COMMAND = "moe.chenxy.fiilpods.action.COMMAND"
-    const val ACTION_REQUEST_STATE = "moe.chenxy.fiilpods.action.REQUEST_STATE"
+    const val ACTION_STATE = "io.github.fnkg9527.fiilpods.action.STATE_CHANGED"
+    const val ACTION_COMMAND = "io.github.fnkg9527.fiilpods.action.COMMAND"
+    const val ACTION_REQUEST_STATE = "io.github.fnkg9527.fiilpods.action.REQUEST_STATE"
 
     const val EXTRA_JSON = "json"
 

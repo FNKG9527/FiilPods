@@ -21,8 +21,16 @@ object FiilConfig {
     /** 伪造能力串：`<id>,<能力位图>`。 */
     const val FAKE_SUPPORT: String = "$FAKE_DEVICE_ID,000000000000000010000000"
 
-    /** 模块包名。 */
-    const val MODULE_PACKAGE: String = "moe.chenxy.fiilpods"
+    /**
+     * 模块包名（= applicationId）。
+     *
+     * ⚠️ 这里必须是 **applicationId**，不是 Kotlin 包名 / namespace。
+     * v3.1.0 起 applicationId 改成 `io.github.fnkg9527.fiilpods`（LSPosed 官方仓库
+     * 要求 `io.github.{用户名}` 前缀），而 Kotlin 包名仍是 `moe.chenxy.fiilpods`。
+     * 蓝牙进程里要用它去 `createPackageContext` / `setPackage`，用错会静默失联。
+     * `ModulePackageTest` 钉死了它与 `BuildConfig.APPLICATION_ID` 一致。
+     */
+    const val MODULE_PACKAGE: String = "io.github.fnkg9527.fiilpods"
 
     /** 设置页刷新周期。 */
     const val SETTINGS_REFRESH_INTERVAL_MS: Long = 3_000L

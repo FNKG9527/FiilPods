@@ -11,7 +11,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "moe.chenxy.fiilpods"
+        applicationId = "io.github.fnkg9527.fiilpods"
         minSdk = 35
         targetSdk = 36
         // v2：修复 Mate 机型无法切换模式（GAIA/Mate 协议族分流）、补齐模块内日志抓取。
@@ -50,8 +50,18 @@ android {
         //   小米耳机」这条链路立一个正式基线：融合设备中心的模式切换/图标、
         //   系统级降噪读写、通知栏与超级岛、LDAC、伪装型号、电量与佩戴，
         //   全部走小米自家的那套 API，FIIL 自己的功能也都能正常使用与切换。
-        versionCode = 8
-        versionName = "3.0.0"
+        // v3.1.0：只改 package（applicationId），功能面与 3.0.0 完全一致。
+        //   原因：LSPosed 官方仓库（Xposed-Modules-Repo）要求 applicationId 反推的
+        //   域名归提交者所有，或使用 io.github.{用户名} 前缀。原包名 moe.chenxy.fiilpods
+        //   反推是 chenxy.moe —— 那是上游 OppoPods 作者的域名，我们没有 DNS 控制权，
+        //   机器人直接判 invalid（工单 Xposed-Modules-Repo/submission#2392）。
+        //   改为 io.github.fnkg9527.fiilpods 后可自动通过校验。
+        //   namespace 与 Kotlin 包名保持 moe.chenxy.fiilpods 不动（类全名不变，
+        //   java_init.list、manifest 相对类名、R 全部无需改动），只把
+        //   applicationId / provider authority / 广播 action 前缀 / MODULE_PACKAGE
+        //   这几处「运行时身份」换成新值。
+        versionCode = 9
+        versionName = "3.1.0"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 

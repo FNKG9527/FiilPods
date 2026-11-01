@@ -32,7 +32,14 @@ data class EarphonePref(
 }
 
 object PodImagePrefs {
-    const val AUTHORITY = "moe.chenxy.fiilpods.podimages"
+    /**
+     * ContentProvider authority。
+     *
+     * ⚠️ Android 要求 authority 全设备唯一。v3.1.0 换了 applicationId，这里也必须跟着换，
+     * 否则新旧两版无法共存（老版本装着时，新版本会 `INSTALL_FAILED_CONFLICTING_PROVIDER`）。
+     * 必须与 `AndroidManifest.xml` 的 `<provider android:authorities>` 完全一致。
+     */
+    const val AUTHORITY = "io.github.fnkg9527.fiilpods.podimages"
     private const val PREF_KEY_EARPHONES = "earphone_prefs_json"
     private const val IMAGE_DIR = "pod_images"
 

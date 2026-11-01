@@ -12,7 +12,7 @@ import moe.chenxy.fiilpods.utils.miuiStrongToast.data.PodParams
  *
  * ## 为什么需要它
  * UI 层是从 `1812z/OppoPods` 整份移植的，它只认 `chen.action.oppopods.*` 这套广播契约
- * （见 [OppoPodsAction]）。而 FIIL 侧原本用的是 `moe.chenxy.fiilpods.action.*`
+ * （见 [OppoPodsAction]）。而 FIIL 侧原本用的是 `io.github.fnkg9527.fiilpods.action.*`
  * （见 `pods/FiilAction.kt`）。两边各说各话，界面就会一直停在「已连接但没有任何数据」。
  *
  * 这个文件负责把 FIIL 的真实状态**翻译**成 OppoPods 的广播格式，单向补齐状态回传；
@@ -112,7 +112,9 @@ object OppoCompatBridge {
         runCatching {
             ctx.sendBroadcast(
                 Intent(action)
-                    .setPackage("moe.chenxy.fiilpods")
+                    // 必须是 applicationId（不是 Kotlin 包名）：ctx 在蓝牙进程里，
+                    // 不显式 setPackage 就只有模块自己的 UI 发得出去。
+                    .setPackage(FiilConfig.MODULE_PACKAGE)
                     .apply(fill)
                     .addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             )

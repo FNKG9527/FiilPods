@@ -16,9 +16,11 @@ dist/
 
 | 版本 | 产物 | 大小 | 下载 |
 |---|---|---|---|
-| **v3.0.0**（最新） | `FiilPods-v3.0.0-release.apk` | 4.33 MB | [Release v3.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v3.0.0) |
+| **v3.1.0**（最新） | `FiilPods-v3.1.0-release.apk` | 4.33 MB | [Release v3.1.0](https://github.com/FNKG9527/FiilPods/releases/tag/v3.1.0) |
+| v3.1.0 | `FiilPods-v3.1.0-debug.apk` | 34.03 MB | 同上（排查问题用，含完整日志） |
+| v3.0.0 | `FiilPods-v3.0.0-release.apk` | 4.33 MB | [Release v3.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v3.0.0) |
 | v3.0.0 | `FiilPods-v3.0.0-debug.apk` | 34.03 MB | 同上（排查问题用，含完整日志） |
-| v2.2.3 | `FiilPods-v2.2.3-release.apk` | 4.33 MB | [Release v2.2.3](https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.3) | `FiilPods-v2.2.3-release.apk` | 4.33 MB | [Release v2.2.3](https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.3) |
+| v2.2.3 | `FiilPods-v2.2.3-release.apk` | 4.33 MB | [Release v2.2.3](https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.3) |
 | v2.2.3 | `FiilPods-v2.2.3-debug.apk` | 34.03 MB | 同上（排查问题用，含完整日志） |
 | v2.2.2 | `FiilPods-v2.2.2-release.apk` | 4.33 MB | [Release v2.2.2](https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.2) |
 | v2.2.2 | `FiilPods-v2.2.2-debug.apk` | 34.03 MB | 同上 |
@@ -33,14 +35,19 @@ dist/
 | v1.0.0 | `FiilPods-v1.0.0-release.apk` | 3.77 MB | [Release v1.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v1.0.0) |
 | v1.0.0 | `FiilPods-v1.0.0-debug.apk` | 46.20 MB | 同上 |
 
-八个版本的**包名与签名完全一致**（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`），可直接覆盖安装，无需卸载。
+九个版本的**签名完全一致**（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`）。
 
-### 2.2.x / 3.0.0 的 SHA-256
+⚠️ **3.1.0 是例外**：为了上架 LSPosed 官方模块仓库，它的包名从 `moe.chenxy.fiilpods` 改成了
+`io.github.fnkg9527.fiilpods`（LSPosed 要求 applicationId 反推的域名归提交者所有）。
+包名不同即不同 App，**3.1.0 不能覆盖安装 3.0.0 及更早版本**，两者可以并存。
+从 3.0.0 升级到 3.1.0 请先卸载旧版再装新版，然后重新在 LSPosed 里启用并勾选作用域。
+
+### 2.2.x / 3.0.x 的 SHA-256
 
 | 版本 | release | debug |
 |---|---|---|
+| v3.1.0 | `E9437CC3682F8152F080B46643174CDEF57278B211752CFABEC1ACCADD4E4FE0` | `68A296F989085AAA33F8C1A023BBB09B78EA63E98086FF4203DB19FE200EE42D` |
 | v3.0.0 | `E5B3F1ECF1E71AE1DEBE7C79D8247BB3101DDD990DE19663101C470ACF771B16` | `C6F651778A26EA0E9BED2DA78DF17DCCFD8F4E33B6BDD21ABF078647CA6ECA5C` |
-
 | v2.2.3 | `F23714F9500DD7CE1EC801305BD0AA03DA70AC03A2821729C731423F4C89844C` | `F1D886C65EF46ABFF1B8DA90BF1352A03524A171DDA225A019F68E8A187624C2` |
 | v2.2.2 | `897726447F172F307AC8F518314BA778CCFE12CFB646D3D3D806603421C3C24C` | `4C8C33073650AF4EDCD354DD4823389C4E504C76C2F5C9BAB8E9814190CD3324` |
 | v2.2.1 | `BA45F8140C37CC4406BAC0D713F619B28B58AF2E35AA12C7B4533E77FE6D2FAF` | `D7EF9DFF19E3AA77EA1A7C779B5BF8326E2DF2FA1DE6E7F721E605455CEEC3E1` |

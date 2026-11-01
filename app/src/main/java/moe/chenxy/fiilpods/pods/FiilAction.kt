@@ -15,17 +15,17 @@ object FiilAction {
 
     // ---- 蓝牙进程 → 其它进程 ----
     /** 连接/断开。extras: address, device_name, connected */
-    const val ACTION_PODS_CONNECTED = "moe.chenxy.fiilpods.action.PODS_CONNECTED"
-    const val ACTION_PODS_DISCONNECTED = "moe.chenxy.fiilpods.action.PODS_DISCONNECTED"
+    const val ACTION_PODS_CONNECTED = "io.github.fnkg9527.fiilpods.action.PODS_CONNECTED"
+    const val ACTION_PODS_DISCONNECTED = "io.github.fnkg9527.fiilpods.action.PODS_DISCONNECTED"
 
     /** 电量变化。extras: address, device_name, left_battery/left_charging/left_connected, right_*, case_* */
-    const val ACTION_PODS_BATTERY_CHANGED = "moe.chenxy.fiilpods.action.PODS_BATTERY_CHANGED"
+    const val ACTION_PODS_BATTERY_CHANGED = "io.github.fnkg9527.fiilpods.action.PODS_BATTERY_CHANGED"
 
     /** ANC 档位变化。extras: address, status(Int: 原始线值 0~4，语义随机型：GAIA 2=监听/3=开放，Mate 2=开放/3=兼听，4 都是风中) */
-    const val ACTION_PODS_ANC_CHANGED = "moe.chenxy.fiilpods.action.PODS_ANC_CHANGED"
+    const val ACTION_PODS_ANC_CHANGED = "io.github.fnkg9527.fiilpods.action.PODS_ANC_CHANGED"
 
     /** 完整状态 JSON 快照（模块自己的 UI 用）。extras: json */
-    const val ACTION_STATE = "moe.chenxy.fiilpods.action.STATE_CHANGED"
+    const val ACTION_STATE = "io.github.fnkg9527.fiilpods.action.STATE_CHANGED"
 
     /**
      * 一次控制操作没有生效。extras: cmd, value, status(操作前的值)
@@ -33,33 +33,33 @@ object FiilAction {
      * 蓝牙进程在「发出命令 → 超时未收到确认回包 → 状态值也未变」时发出，
      * UI 收到后必须给出可见提示，不能静默失败（目标第五阶段要求）。
      */
-    const val ACTION_OP_FAILED = "moe.chenxy.fiilpods.action.OP_FAILED"
+    const val ACTION_OP_FAILED = "io.github.fnkg9527.fiilpods.action.OP_FAILED"
 
     // ---- 其它进程 → 蓝牙进程 ----
     /** 请求立即回发一次状态。 */
-    const val ACTION_REFRESH_STATUS = "moe.chenxy.fiilpods.action.REFRESH_STATUS"
+    const val ACTION_REFRESH_STATUS = "io.github.fnkg9527.fiilpods.action.REFRESH_STATUS"
 
     /** 设置页/UI 初始化时请求状态。 */
-    const val ACTION_PODS_UI_INIT = "moe.chenxy.fiilpods.action.PODS_UI_INIT"
+    const val ACTION_PODS_UI_INIT = "io.github.fnkg9527.fiilpods.action.PODS_UI_INIT"
 
     /** 用户选了一个 ANC 档位。extras: status(Int) */
-    const val ACTION_ANC_SELECT = "moe.chenxy.fiilpods.action.ANC_SELECT"
+    const val ACTION_ANC_SELECT = "io.github.fnkg9527.fiilpods.action.ANC_SELECT"
 
     /** 通用命令通道（模块 UI → 蓝牙进程）。extras: cmd, value, flag */
-    const val ACTION_COMMAND = "moe.chenxy.fiilpods.action.COMMAND"
+    const val ACTION_COMMAND = "io.github.fnkg9527.fiilpods.action.COMMAND"
 
     /** 请求当前状态快照。 */
-    const val ACTION_REQUEST_STATE = "moe.chenxy.fiilpods.action.REQUEST_STATE"
+    const val ACTION_REQUEST_STATE = "io.github.fnkg9527.fiilpods.action.REQUEST_STATE"
 
     /** 设置项变更（设备 ID、开关等），各进程据此重读配置。 */
-    const val ACTION_CONFIG_CHANGED = "moe.chenxy.fiilpods.action.CONFIG_CHANGED"
+    const val ACTION_CONFIG_CHANGED = "io.github.fnkg9527.fiilpods.action.CONFIG_CHANGED"
 
     /** 蓝牙进程里模块服务是否存活（设置页用来判断能否显示卡片）。 */
     const val ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE =
-        "moe.chenxy.fiilpods.action.MODULE_BLUETOOTH_SERVICE_ALIVE"
+        "io.github.fnkg9527.fiilpods.action.MODULE_BLUETOOTH_SERVICE_ALIVE"
 
     // ---- 模块自己的 UI ----
-    const val ACTION_SHOW_PODS_UI = "moe.chenxy.fiilpods.action.SHOW_PODS_UI"
+    const val ACTION_SHOW_PODS_UI = "io.github.fnkg9527.fiilpods.action.SHOW_PODS_UI"
 
     // ---- extras 键 ----
     const val EXTRA_JSON = "json"

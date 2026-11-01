@@ -11,7 +11,8 @@ import moe.chenxy.fiilpods.config.imageUri
 import moe.chenxy.fiilpods.pods.PodImages
 
 object PodImageLoader {
-    private const val MODULE_PACKAGE = "moe.chenxy.fiilpods"
+    /** applicationId，不是 Kotlin 包名 —— 见 [moe.chenxy.fiilpods.pods.FiilConfig.MODULE_PACKAGE]。 */
+    private const val MODULE_PACKAGE = "io.github.fnkg9527.fiilpods"
 
     fun loadBitmap(
         context: Context,

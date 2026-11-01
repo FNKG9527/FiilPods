@@ -61,18 +61,20 @@
             android:excludeFromRecents="true"
             android:exported="true">
             <intent-filter>
-                <action android:name="moe.chenxy.fiilpods.action.SHOW_PODS_UI" />
+                <action android:name="io.github.fnkg9527.fiilpods.action.SHOW_PODS_UI" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
         <!-- 自定义耳机图片的 ContentProvider。
              移植 OppoPods 时漏了这一条声明，导致用户一旦设置了自定义耳机图片，
-             imageUri() 生成的 content://moe.chenxy.fiilpods.podimages/... 无人应答，
-             AsyncImage 直接抛 ActivityNotFoundException。 -->
+             imageUri() 生成的 content://io.github.fnkg9527.fiilpods.podimages/... 无人应答，
+             AsyncImage 直接抛 ActivityNotFoundException。
+             v3.1.0 换 applicationId 时 authority 一并更换：authority 全设备唯一，
+             沿用旧值会与已安装的旧版本冲突（INSTALL_FAILED_CONFLICTING_PROVIDER）。 -->
         <provider
             android:name=".config.PodImageProvider"
-            android:authorities="moe.chenxy.fiilpods.podimages"
+            android:authorities="io.github.fnkg9527.fiilpods.podimages"
             android:exported="true"
             android:grantUriPermissions="false" />
 

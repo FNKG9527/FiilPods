@@ -275,7 +275,7 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
             addAction(FiilAction.ACTION_CONFIG_CHANGED)
             // ---- OppoPods 兼容契约 ----
             // UI 层是从 1812z/OppoPods 整份移植过来的，它只发 chen.action.oppopods.*，
-            // 不认识上面那套 moe.chenxy.fiilpods.action.*。两套都要接，否则界面点了没反应。
+            // 不认识上面那套 io.github.fnkg9527.fiilpods.action.*。两套都要接，否则界面点了没反应。
             addAction(OppoPodsAction.ACTION_PODS_UI_INIT)
             addAction(OppoPodsAction.ACTION_REFRESH_STATUS)
             addAction(OppoPodsAction.ACTION_ANC_SELECT)
