@@ -15,6 +15,16 @@
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Framework](https://img.shields.io/badge/Framework-LSPosed-FF6B6B?style=flat-square)
 ![ROM](https://img.shields.io/badge/ROM-澎湃OS%203%20%7C%204-FF6900?style=flat-square)
+![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)
+
+</div>
+
+<div align="center">
+
+[![Star](https://img.shields.io/github/stars/FNKG9527/FiilPods?style=flat-square&color=yellow)](https://github.com/FNKG9527/FiilPods/stargazers)
+[![Fork](https://img.shields.io/github/forks/FNKG9527/FiilPods?style=flat-square&color=orange)](https://github.com/FNKG9527/FiilPods/network/members)
+[![Issues](https://img.shields.io/github/issues/FNKG9527/FiilPods?style=flat-square&color=red)](https://github.com/FNKG9527/FiilPods/issues)
+[![Last commit](https://img.shields.io/github/last-commit/FNKG9527/FiilPods?style=flat-square)](https://github.com/FNKG9527/FiilPods/commits/main)
 
 </div>
 
@@ -48,6 +58,7 @@
 | 🧪 **[真机回归记录](docs/DEVICE_TEST.md)** | 19 项用例的实测结果 |
 | 🐞 **[缺陷根因档案](docs/IMPLEMENTATION.md#七相关文档)** | 九处连接根因、跨进程闪退、模式切换失效、v2.1 三处修复 |
 | 📝 **[更新日志](CHANGELOG.md)** | 1.0.0 → 2.2.1 的完整变更 |
+| ⚖️ **[第三方与借鉴来源](THIRD_PARTY_LICENSES.md)** | 依赖许可、移植了哪些开源项目的哪部分、协议事实来源 |
 
 ---
 
@@ -193,16 +204,101 @@ Mate 机型建立 RFCOMM 链路后，**必须先发一条解锁帧**，否则耳
 
 ---
 
+## 🔗 相关项目
+
+本模块属于一套围绕 FIIL 耳机的逆向与工具链。除了这里的 Android 模块，同一作者还开源了下面三个仓库 ——
+协议知识从笔记沉淀到工具，工具再反哺模块：
+
+| 仓库 | 是什么 | 语言 / 许可 |
+|---|---|---|
+| **[FiilPods](https://github.com/FNKG9527/FiilPods)** | **本项目**。FIIL 耳机的 HyperOS 系统级控制模块（Xposed/LSPosed） | Kotlin · GPL-3.0 |
+| **[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)** | FIIL 蓝牙控制协议的逆向笔记：GAIA / Mate / 豆包三套命令空间的帧格式、190 条命令表与实机验证日志 | 文档 · CC-BY-SA-4.0 |
+| **[fiil-pods-pc](https://github.com/FNKG9527/fiil-pods-pc)** | Windows PC 控制台：走 BLE GATT，tkinter GUI，PyInstaller + Inno Setup 打包成安装程序 | Python · GPL-3.0 |
+| **[fiil-ldac-unlock](https://github.com/FNKG9527/fiil-ldac-unlock)** | LDAC 离线激活工具集：官方服务器下线后，如何在自己买的耳机上重新打开 LDAC | Python · GPL-3.0 |
+
+**四者的关系**：
+
+- **fiil-headphone-protocol** 是协议层的事实来源。本模块 `docs/PROTOCOL_FIIL.md` 里的帧格式、
+  `cid`/`cmdId` 对照、190 条 GAIA 命令表，与该仓库互相印证；碰上「这条命令到底该发什么」的疑问，
+  两边交叉查比单看一边可靠。
+- **fiil-ldac-unlock** 解决的是「LDAC 怎么打开」，本模块 `pods/FIILProtocol.kt` 里的
+  `setLdacSwitch()` / `requestLdacState()` 与它同源（`cid=1 cmdId=13` 写、`cid=39 cmdId=143` 读）。
+  v2.2.2 那轮「详情页看不到 LDAC 开关」的定论就是在这里对上的。
+- **fiil-pods-pc** 走 BLE GATT（`fiil_pods_pc` 的 `FIILPeripheral` 路线），本模块在蓝牙资源被
+  经典音频链路占用、BLE 广播消失的场景下，也会落回同样的 GATT 通道，两边踩的是同一批坑。
+
+> 三个仓库都是独立可用的，不依赖本模块；本模块也不依赖它们运行，只是知识同源。
+
+---
+
 ## 🙏 致谢 (Acknowledgments)
 
-本项目的界面形态、设置项组织与系统注入思路，大量参考了以下开源项目：
+本项目的界面形态、设置项组织与系统注入思路，来自对以下开源项目的阅读与移植。**哪些部分是借鉴、借鉴到什么程度，逐条写在下面** —— 这不是客套，是 GPL-3.0 下的义务，也方便后来者顺藤摸瓜。
 
-- **[OPPOPods](https://github.com/1812z/OppoPods)** —— **本项目的原型与主要借鉴对象**。UI 布局、设置页结构、三 Tab 底部导航、超级岛与融合设备中心的实现范式均移植自此项目，在此向作者致以最诚挚的感谢。
-- **[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)** —— 本项目的协议与实现参考来源。FIIL 私有协议的帧格式、命令号与握手流程分析参考了该项目的工作。
-- **[libxposed](https://github.com/libxposed/api)** —— 现代化的 Xposed API 实现。
-- **[Miuix](https://github.com/miuix-kotlin-multiplatform/miuix)** —— 提供 HyperOS 风格的 Compose 组件。
+### 界面与工程骨架
 
-同时也感谢 [FIIL](https://www.fiil.com/) 做出了这些耳机，以及所有提供测试反馈的用户。
+- **[OppoPods](https://github.com/1812z/OppoPods)**（201★, Kotlin）—— **本项目的原型与主要借鉴对象**。
+  移植范围是**整个 UI 层与设置页骨架**：三 Tab 底部导航、`MainTabsScaffold` 的页面组织、
+  详情页卡片布局、设置页分组结构、`PopupActivity` 弹窗形态、`ConfigManager` 的
+  `@Serializable AppConfig` + 扁平镜像键（供 LSPosed remote prefs 直读）、
+  `OppoPodsAction` 广播契约、`utils/miuiStrongToast`（超级岛 / 焦点通知）的封装、
+  `PodImagePrefs` 自定义耳机图片体系。
+  `docs/ARCH_OPPOPODS.md` 是对它的逐节架构拆解（移植蓝图），行号对应当前 checkout。
+  **本项目包的包名是 `moe.chenxy.fiilpods`，与 OppoPods 的 `moe.chenxy.oppopods` 只差一个词，
+  因为整个工程是从它 fork 后改造的。**
+  协议层、Hook 点、设备识别则与本项目完全不同 —— OppoPods 讲 OPPO 的 VDID/VDSF/OESF/VDSP 私有 AT，
+  FIIL 讲 GAIA 190 条命令与 Mate 的 `cid`/`cmdId`。
+- **[OppoPods（Leaf-lsgtky 分支）](https://github.com/Leaf-lsgtky/OppoPods)** —— OppoPods 的一个活跃分支，
+  部分新特性（如 `OPPOLeaConnect` 的 LE Audio 思路）先在这里出现。
+- **[HyperPods](https://github.com/Art-Chen/HyperPods)**（103★, Kotlin, GPL-3.0）—— 提供了不同的组织方式参考：
+  超级岛的多形态切换、通知渠道命名策略。模块「关于」页里也列了它。
+
+### Hook 架构与逆向方法
+
+- **[HuaweiPods](https://github.com/Nshpiter/HuaweiPods)**（36★, Kotlin, GPL-3.0）—— **Hook 基础设施的主模板**。
+  `HookContext` 的极简版（去掉了热重载、关闭代际、稳定 HookId）、
+  `HookEntry` 的 `META-INF/xposed/java_init.list` 入口声明方式、
+  **LSPosed remote prefs 的注入时机**（Hook 跑在 `com.android.bluetooth` / `com.xiaomi.bluetooth` /
+  `com.milink.service` 里，读不到模块 App 自己的 `SharedPreferences`，必须由 `HookEntry.loadHook` 注入）、
+  以及「一个 APK 两种身份（既是 Compose 应用又是注入五个系统进程的模块）」的整体结构，都来自对它的阅读。
+  `docs/ARCH_HUAWEIPODS.md` 是对它的逐节规格整理。
+  v2.2.0 修「焦点通知无效」时，`MiBluetoothToastHook` 改用 `Application.attach` 作为主通道，
+  这个思路也是对照 HuaweiPods 的注释 + 本次逆向确认的（旧构造器 hook 命中的重载被
+  `MiuiApplication` 的一条门控分支挡住，真机永不执行）。
+- **[OPPOLeaConnect](https://github.com/Leaf-lsgtky/OPPOLeaConnect)**（Java, GPL-3.0）—— LE Audio / LC3 连接优化。
+  v2.2.1 删掉的那页「OPPO LE Audio 设置」就是从 OppoPods 连带抄来的空壳，判定依据之一是它只对
+  OPPO 的私有 AT 族有效，与 FIIL 无关。
+
+### 依赖库
+
+- **[libxposed/api](https://github.com/libxposed/api)**（734★, Apache-2.0）—— 现代化的 Xposed API。
+  本模块用 **API 102**（`compileOnly(libs.libxposedApi)`），需要支持新版 API 的 LSPosed。
+- **[Miuix](https://github.com/miuix-kotlin-multiplatform/miuix)**（1,539★, Apache-2.0）—— 提供 HyperOS 风格的
+  Compose 组件（`Card`/`Scaffold`/`SwitchPreference`/`OverlayDialog`/`MiuixTheme`）。
+  本模块的 `miuix`、`miuix.preference`、`miuix.icons`、`miuix.blur`、`miuix.nav` 五个模块都来自这里。
+
+### 协议与逆向产物
+
+- **[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)**（CC-BY-SA-4.0）—— 见上文「相关项目」，
+  帧格式、命令号与握手流程的事实来源。
+- **FIIL+ 3.5.2 官方 App 的静态逆向** —— 协议层的另一条独立来源：`docs/PROTOCOL_FIIL.md` 的
+  190 条 GAIA 命令表、Mate 的 `cid`/`cmdId` 对照、`setUnlock` 握手时机，均来自对官方 APK 的
+  静态分析与真机逐条验证。仓库**不包含**任何 APK 或反编译产物，只留结论与脱敏后的日志。
+  v2.2.3 的图标修复也是靠这条路径定的案：`BluetoothServiceClient.getHeadsetType` 的三句方法体、
+  `vg/a.b(String)` 的小米 6 位编码判定表、`a0.smali` 的 packed-switch 图标映射，
+  全部标注了 `文件:行号`（见 `docs/RELEASE_v2.2.3.md` 第十七节）。
+- **MiLink（`com.milink.service`）18.2.0.12** —— 融合设备中心、超级岛的系统侧实现，
+  是「图标为什么不跟着型号走」「切模式图标为什么卡旧值」这类问题的排查对象。
+
+### 特别感谢
+
+- **[FIIL](https://www.fiil.com/)** —— 做出了这些耳机。没有硬件，这一切无从谈起。
+- **所有提供测试反馈的用户** —— v2.2.x 的多数 bug 是在真机上被你们试出来的，
+  包括 v2.2.3 那个「第一版漏了 Key Max 是头戴式」的低级错误。
+
+> ⚠️ 如果上述任何一处归属有误或遗漏，欢迎提 Issue 指出，会立即更正。
+> 第三方组件的完整清单与逐项落点见 **[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)**；
+> 各项目仓库里有各自的完整许可文本，本项目的 `LICENSE` 为 GPL-3.0。
 
 ---
 

@@ -10,11 +10,21 @@
 
 <div align="center">
 
-![Release](https://img.shields.io/badge/Release-2.1.0-4B8BF5?style=flat-square)
+![Release](https://img.shields.io/badge/Release-2.2.1-4B8BF5?style=flat-square)
 ![Downloads](https://img.shields.io/github/downloads/FNKG9527/FiilPods/total?style=flat-square&color=34C759)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Framework](https://img.shields.io/badge/Framework-LSPosed-FF6B6B?style=flat-square)
 ![ROM](https://img.shields.io/badge/ROM-HyperOS%203%20%7C%204-FF6900?style=flat-square)
+![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)
+
+</div>
+
+<div align="center">
+
+[![Star](https://img.shields.io/github/stars/FNKG9527/FiilPods?style=flat-square&color=yellow)](https://github.com/FNKG9527/FiilPods/stargazers)
+[![Fork](https://img.shields.io/github/forks/FNKG9527/FiilPods?style=flat-square&color=orange)](https://github.com/FNKG9527/FiilPods/network/members)
+[![Issues](https://img.shields.io/github/issues/FNKG9527/FiilPods?style=flat-square&color=red)](https://github.com/FNKG9527/FiilPods/issues)
+[![Last commit](https://img.shields.io/github/last-commit/FNKG9527/FiilPods?style=flat-square)](https://github.com/FNKG9527/FiilPods/commits/main)
 
 </div>
 
@@ -47,7 +57,8 @@ The UI and settings mirror [OPPOPods](https://github.com/1812z/OppoPods) 2.2.0 �
 | 💡 **[Implementation](docs/IMPLEMENTATION.md)** | Injection / dual transport / protocol routing / settings injection |
 | 📡 **[Protocol tables](docs/PROTOCOL_FIIL.md)** | UUIDs, 190 GAIA commands, Mate cid/cmd |
 | 🧪 **[Device test log](docs/DEVICE_TEST.md)** | 19 on-device test cases |
-| 📝 **[Changelog](CHANGELOG.md)** | 1.0.0 → 2.1.0 |
+| 📝 **[Changelog](CHANGELOG.md)** | 1.0.0 → 2.2.1, complete history |
+| ⚖️ **[Third-party & borrowed code](THIRD_PARTY_LICENSES.md)** | Dependency licenses, exactly which open-source projects were ported and where, protocol sources |
 
 > The protocol documentation is currently Chinese-only.
 
@@ -178,16 +189,109 @@ This corresponds to `setUnlock()` in the official app and fires right after the 
 
 ---
 
+## 🔗 Related projects
+
+This module is one part of a toolchain built around reverse-engineering FIIL earbuds. Besides the Android module
+here, the same author has open-sourced three more repositories — protocol notes settle into tools, and the tools feed back into the module:
+
+| Repository | What it is | Language / License |
+|---|---|---|
+| **[FiilPods](https://github.com/FNKG9527/FiilPods)** | **This project.** System-level FIIL earbud control for HyperOS (Xposed/LSPosed) | Kotlin · GPL-3.0 |
+| **[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)** | Reverse-engineering notes on the FIIL control protocol: frame layouts for the GAIA / Mate / Doubao command spaces, 190-command table, on-device verification logs | Docs · CC-BY-SA-4.0 |
+| **[fiil-pods-pc](https://github.com/FNKG9527/fiil-pods-pc)** | Windows desktop console over BLE GATT: tkinter GUI, packaged with PyInstaller + Inno Setup | Python · GPL-3.0 |
+| **[fiil-ldac-unlock](https://github.com/FNKG9527/fiil-ldac-unlock)** | LDAC offline activation toolkit — how to re-enable LDAC on a device you already own after the vendor servers went down | Python · GPL-3.0 |
+
+**How they relate:**
+
+- **fiil-headphone-protocol** is the source of truth at the protocol layer. The frame format, the `cid`/`cmdId`
+  table and the 190-command GAIA table in `docs/PROTOCOL_FIIL.md` corroborate against it; when the question is
+  "what exactly should this command send", cross-checking both is more reliable than trusting either alone.
+- **fiil-ldac-unlock** solves "how do I turn LDAC on", and the module's `pods/FIILProtocol.kt`
+  `setLdacSwitch()` / `requestLdacState()` share its lineage (`cid=1 cmdId=13` to write, `cid=39 cmdId=143` to read).
+  That is where the v2.2.2 conclusion about "the LDAC switch never shows up" was settled.
+- **fiil-pods-pc** goes over BLE GATT; this module falls back to that same GATT channel when Bluetooth resources are
+  held by the classic audio link and the BLE advertisement disappears. Both hit the same pitfalls.
+
+> All three are independently usable and do not depend on this module; this module does not depend on them to run.
+> They merely share the same body of knowledge.
+
+---
+
 ## 🙏 Acknowledgments
 
-The UI, settings organisation and system-injection approach draw heavily on these open-source projects:
+The UI shape, settings organisation and system-injection approach come from reading and porting the open-source
+projects below. **What exactly was borrowed, and to what depth, is written out item by item** — this is not
+boilerplate; it is an obligation under GPL-3.0, and it helps anyone following the same path.
 
-- **[OPPOPods](https://github.com/1812z/OppoPods)** — **the origin and primary reference for this project.** The UI layout, settings structure, three-tab bottom navigation, Smart Island and HyperConnect implementations were ported from it. Sincere thanks to the author.
-- **[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)** — protocol and implementation reference. The FIIL frame format, command IDs and handshake analysis build on this work.
-- **[libxposed](https://github.com/libxposed/api)** — modern Xposed API.
-- **[Miuix](https://github.com/miuix-kotlin-multiplatform/miuix)** — HyperOS-style Compose components.
+### UI and project skeleton
 
-And thanks to [FIIL](https://www.fiil.com/) for making these earbuds, and to everyone who provided testing feedback.
+- **[OppoPods](https://github.com/1812z/OppoPods)** (201★, Kotlin) — **the origin and primary reference for this project.**
+  The port covers **the entire UI layer and settings skeleton**: three-tab bottom navigation, the
+  `MainTabsScaffold` page organisation, detail-page card layout, settings-page grouping, the `PopupActivity`
+  form, `ConfigManager`'s `@Serializable AppConfig` plus flat mirror keys (so LSPosed remote prefs can read them
+  directly), the `OppoPodsAction` broadcast contract, the `utils/miuiStrongToast` (Smart Island / focus
+  notification) wrapper, and the `PodImagePrefs` custom-earbud-image system.
+  `docs/ARCH_OPPOPODS.md` is a section-by-section architecture teardown of it (the porting blueprint), with line
+  numbers against the current checkout.
+  **This project's package is `moe.chenxy.fiilpods`, one word away from OppoPods' `moe.chenxy.oppopods`,
+  because the whole project was forked from it and then reshaped.**
+  The protocol layer, hook points and device identification are completely different — OppoPods speaks OPPO's
+  VDID/VDSF/OESF/VDSP private AT, FIIL speaks GAIA's 190 commands and Mate's `cid`/`cmdId`.
+- **[OppoPods (Leaf-lsgtky fork)](https://github.com/Leaf-lsgtky/OppoPods)** — an active fork where some newer ideas
+  (e.g. the LE Audio approach in `OPPOLeaConnect`) first appear.
+- **[HyperPods](https://github.com/Art-Chen/HyperPods)** (103★, Kotlin, GPL-3.0) — a reference for a different way of
+  organising things: Smart Island multi-form switching, notification-channel naming strategies. It is also listed
+  on the module's About page.
+
+### Hook infrastructure and reverse-engineering method
+
+- **[HuaweiPods](https://github.com/Nshpiter/HuaweiPods)** (36★, Kotlin, GPL-3.0) — **the main template for the hook
+  infrastructure.** The simplified `HookContext` (heat reload, shutdown generations and stable HookIds removed),
+  `HookEntry`'s `META-INF/xposed/java_init.list` entry declaration, **the LSPosed remote-prefs injection timing**
+  (hooks run inside `com.android.bluetooth` / `com.xiaomi.bluetooth` / `com.milink.service`, which cannot read the
+  module app's own `SharedPreferences`, so `HookEntry.loadHook` must inject them), and the "one APK, two identities"
+  overall shape (a Compose app that also injects into five system processes) all come from reading it.
+  `docs/ARCH_HUAWEIPODS.md` is a section-by-section specification of it.
+  When v2.2.0 fixed "focus notification does nothing", `MiBluetoothToastHook` moved to `Application.attach` as the
+  primary channel; that idea was confirmed against HuaweiPods' comments plus this round's reverse engineering — the
+  old constructor hook targeted an overload gated behind a branch in `MiuiApplication` that never executes on device.
+- **[OPPOLeaConnect](https://github.com/Leaf-lsgtky/OPPOLeaConnect)** (Java, GPL-3.0) — LE Audio / LC3 connection
+  optimisation. The "OPPO LE Audio settings" page removed in v2.2.1 was an empty shell copied over from OppoPods;
+  one of the deciding factors was that it only applies to OPPO's private AT family and has nothing to do with FIIL.
+
+### Dependencies
+
+- **[libxposed/api](https://github.com/libxposed/api)** (734★, Apache-2.0) — modern Xposed API. This module targets
+  **API 102** (`compileOnly(libs.libxposedApi)`) and needs an LSPosed build that supports the new API.
+- **[Miuix](https://github.com/miuix-kotlin-multiplatform/miuix)** (1,539★, Apache-2.0) — HyperOS-style Compose
+  components (`Card`/`Scaffold`/`SwitchPreference`/`OverlayDialog`/`MiuixTheme`). All five of the module's
+  `miuix`, `miuix.preference`, `miuix.icons`, `miuix.blur` and `miuix.nav` artifacts come from here.
+
+### Protocol and reverse-engineering artifacts
+
+- **[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)** (CC-BY-SA-4.0) — see "Related
+  projects" above; the source of truth for frame formats, command IDs and the handshake flow.
+- **Static reverse engineering of the official FIIL+ 3.5.2 app** — the other independent source for the protocol
+  layer: the 190-command GAIA table, Mate's `cid`/`cmdId` mapping and the `setUnlock` handshake timing in
+  `docs/PROTOCOL_FIIL.md` all come from analysing the official APK and verifying it command by command on a real
+  device. The repository **contains no APKs and no decompiled artifacts**, only conclusions and redacted logs.
+  The v2.2.3 icon fix was settled along the same path: `BluetoothServiceClient.getHeadsetType`'s three-statement
+  body, the Xiaomi six-digit code checks in `vg/a.b(String)`, and the packed-switch icon table in `a0.smali`, all
+  cited with `file:line` (see section 17 of `docs/RELEASE_v2.2.3.md`).
+- **MiLink (`com.milink.service`) 18.2.0.12** — the system-side implementation behind HyperConnect and Smart Island,
+  and the object of investigation for questions like "why doesn't the icon follow the model" and "why does the icon
+  stick to the old value when switching modes".
+
+### Special thanks
+
+- **[FIIL](https://www.fiil.com/)** — for making these earbuds. Without the hardware, none of this exists.
+- **Everyone who provided testing feedback** — most v2.2.x bugs were found by you on real devices, including that
+  v2.2.3 first-pass mistake where Key Max was missed from the over-ear list.
+
+> ⚠️ If any attribution above is wrong or missing, please open an issue and it will be corrected immediately.
+> The complete third-party inventory, with an item-by-item list of where each ported piece landed, is in
+> **[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)**. Full licence texts for each project live in their own
+> repositories; this project is GPL-3.0.
 
 ---
 

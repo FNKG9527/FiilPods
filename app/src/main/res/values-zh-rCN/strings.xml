@@ -4,6 +4,8 @@
     <string name="app_subtitle">OPPO 耳机适配 HyperOS</string>
     <string name="pod_info">耳机信息</string>
     <string name="about">关于 FiilPods</string>
+    <string name="about_borrowed">借鉴了这些开源项目</string>
+    <string name="about_related">同一作者的更多 FIIL 项目</string>
     <string name="settings">设置</string>
     <string name="module">模块</string>
     <string name="earphones">耳机</string>
