@@ -17,9 +17,9 @@
 | 新增文件（本轮） | `app/src/test/java/moe/chenxy/fiilpods/pods/HeadphoneFormFactorTest.kt`（108 行） |
 | 构建 | `testDebugUnitTest` + `assembleDebug` + `assembleRelease` → BUILD SUCCESSFUL（分步执行，见下方说明） |
 | 单测 | suites=5, tests=64, failures=0, errors=0, skipped=0（较 v2.2.2 的 57 项新增 7 项） |
-| 产物 | `dist/FiilPods-v2.2.3-debug.apk`(36,161,343 B)、`dist/FiilPods-v2.2.3-release.apk`(4,543,344 B) |
-| release SHA256 | `416E2780351FADF74AB75BD32ED6D565FE2857F9064052FD0D70662CD4EA4FD6` |
-| debug SHA256 | `84534EA5A0A8D2FC1C1CE8438EA86770F40184E2C198C7182D869E722681904B` |
+| 产物 | `dist/FiilPods-v2.2.3-debug.apk`(35,688,080 B)、`dist/FiilPods-v2.2.3-release.apk`(4,543,592 B) |
+| release SHA256 | `F23714F9500DD7CE1EC801305BD0AA03DA70AC03A2821729C731423F4C89844C` |
+| debug SHA256 | `F1D886C65EF46ABFF1B8DA90BF1352A03524A171DDA225A019F68E8A187624C2` |
 | 上一版（v2.2.2）release SHA256 | `897726447F172F307AC8F518314BA778CCFE12CFB646D3D3D806603421C3C24C` |
 
 > 构建方式说明：**必须用 `clean` 后重建的产物交付**。此前增量构建出的 release 包

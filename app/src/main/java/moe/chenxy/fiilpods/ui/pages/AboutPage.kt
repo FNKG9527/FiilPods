@@ -49,35 +49,45 @@ fun AboutPage(
             Card {
                 BasicComponent(
                     title = "OppoPods-Enhanced",
-                    summary = "https://github.com/1812z/OppoPods",
+                    summary = "本项目的原型：三 Tab 导航、详情页卡片、设置页分组、\n" +
+                        "ConfigManager、超级岛封装、自定义耳机图体系\n" +
+                        "github.com/1812z/OppoPods",
                     onClick = {
                         context.openUrl("https://github.com/1812z/OppoPods")
                     }
                 )
                 BasicComponent(
-                    title = "OppoPods",
-                    summary = "https://github.com/Leaf-lsgtky/OppoPods",
+                    title = "OppoPods（上游分支）",
+                    summary = "同源码的上游分支，改造期间持续对照\n" +
+                        "github.com/Leaf-lsgtky/OppoPods",
                     onClick = {
                         context.openUrl("https://github.com/Leaf-lsgtky/OppoPods")
                     }
                 )
                 BasicComponent(
                     title = "HyperPods",
-                    summary = "https://github.com/Art-Chen/HyperPods",
+                    summary = "借鉴超级岛多形态切换与通知渠道命名策略\n" +
+                        "属设计参考，无成段代码移植\n" +
+                        "github.com/Art-Chen/HyperPods",
                     onClick = {
                         context.openUrl("https://github.com/Art-Chen/HyperPods")
                     }
                 )
                 BasicComponent(
                     title = "HuaweiPods",
-                    summary = "https://github.com/Nshpiter/HuaweiPods",
+                    summary = "Hook 基础设施主模板：HookContext 极简版、\n" +
+                        "java_init.list 入口、LSPosed 远程 prefs 注入时机、\n" +
+                        "「一个 APK 两种身份」、Application.attach 注册通道\n" +
+                        "github.com/Nshpiter/HuaweiPods",
                     onClick = {
                         context.openUrl("https://github.com/Nshpiter/HuaweiPods")
                     }
                 )
                 BasicComponent(
                     title = "OPPOLeaConnect",
-                    summary = "https://github.com/Leaf-lsgtky/OPPOLeaConnect",
+                    summary = "仅作为 v2.2.1 删除 LE Audio 设置页的判定依据\n" +
+                        "本项目不含它的任何代码\n" +
+                        "github.com/Leaf-lsgtky/OPPOLeaConnect",
                     onClick = {
                         context.openUrl("https://github.com/Leaf-lsgtky/OPPOLeaConnect")
                     }
@@ -91,28 +101,32 @@ fun AboutPage(
             Card {
                 BasicComponent(
                     title = "本项目 · FiilPods",
-                    summary = "https://github.com/FNKG9527/FiilPods",
+                    summary = "本模块源码，问题与建议请提到 Issues\n" +
+                        "github.com/FNKG9527/FiilPods",
                     onClick = {
                         context.openUrl("https://github.com/FNKG9527/FiilPods")
                     }
                 )
                 BasicComponent(
                     title = "FIIL 协议逆向笔记",
-                    summary = "https://github.com/FNKG9527/fiil-headphone-protocol",
+                    summary = "协议帧格式、命令表与握手流程的事实来源\n" +
+                        "github.com/FNKG9527/fiil-headphone-protocol",
                     onClick = {
                         context.openUrl("https://github.com/FNKG9527/fiil-headphone-protocol")
                     }
                 )
                 BasicComponent(
                     title = "FIIL 耳机 PC 控制台",
-                    summary = "https://github.com/FNKG9527/fiil-pods-pc",
+                    summary = "同一套协议的 Windows 端实现（BLE GATT）\n" +
+                        "github.com/FNKG9527/fiil-pods-pc",
                     onClick = {
                         context.openUrl("https://github.com/FNKG9527/fiil-pods-pc")
                     }
                 )
                 BasicComponent(
                     title = "FIIL LDAC 离线激活",
-                    summary = "https://github.com/FNKG9527/fiil-ldac-unlock",
+                    summary = "LDAC 开关协议的验证工具集\n" +
+                        "github.com/FNKG9527/fiil-ldac-unlock",
                     onClick = {
                         context.openUrl("https://github.com/FNKG9527/fiil-ldac-unlock")
                     }

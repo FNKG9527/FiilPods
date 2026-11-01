@@ -10,7 +10,7 @@
 
 <div align="center">
 
-![Release](https://img.shields.io/badge/Release-2.2.1-4B8BF5?style=flat-square)
+![Release](https://img.shields.io/badge/Release-2.2.3-4B8BF5?style=flat-square)
 ![Downloads](https://img.shields.io/github/downloads/FNKG9527/FiilPods/total?style=flat-square&color=34C759)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Framework](https://img.shields.io/badge/Framework-LSPosed-FF6B6B?style=flat-square)
@@ -57,7 +57,7 @@ The UI and settings mirror [OPPOPods](https://github.com/1812z/OppoPods) 2.2.0 �
 | 💡 **[Implementation](docs/IMPLEMENTATION.md)** | Injection / dual transport / protocol routing / settings injection |
 | 📡 **[Protocol tables](docs/PROTOCOL_FIIL.md)** | UUIDs, 190 GAIA commands, Mate cid/cmd |
 | 🧪 **[Device test log](docs/DEVICE_TEST.md)** | 19 on-device test cases |
-| 📝 **[Changelog](CHANGELOG.md)** | 1.0.0 → 2.2.1, complete history |
+| 📝 **[Changelog](CHANGELOG.md)** | 1.0.0 → 2.2.3, complete history |
 | ⚖️ **[Third-party & borrowed code](THIRD_PARTY_LICENSES.md)** | Dependency licenses, exactly which open-source projects were ported and where, protocol sources |
 
 > The protocol documentation is currently Chinese-only.

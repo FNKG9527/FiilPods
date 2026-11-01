@@ -66,6 +66,26 @@
   `FiilModels.isHeadphones(earType)`。判定依据见文档 17.4 —— **第一版实现漏了
   Key Max（46）**，那恰好是用户手上那台，于是「改了没效果」。现在有测试钉死全集。
 
+- **设置页「关于」补齐项目出处**
+
+  原页面只有一组「借鉴了这些开源项目」，每项只写一个仓库链接。
+  现在：
+
+  1. 新增第二分组，列出同一作者围绕 FIIL 的四个仓库 ——
+     本模块 `FiilPods`、[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)
+     （协议逆向笔记）、[fiil-pods-pc](https://github.com/FNKG9527/fiil-pods-pc)
+     （PC 控制台）、[fiil-ldac-unlock](https://github.com/FNKG9527/fiil-ldac-unlock)
+     （LDAC 离线激活），并说明四者与本模块的关系（协议知识 → 工具 → 模块，知识同源）。
+  2. 原「借鉴」分组的每一项改写成**写清借鉴了什么**：
+     OppoPods 是整个 UI 层与设置页骨架的原型；HuaweiPods 提供 Hook 基础设施模板
+     （HookContext 极简版、`java_init.list` 入口、LSPosed 远程 prefs 注入时机、
+     「一个 APK 两种身份」、`Application.attach` 注册通道）；HyperPods 是超级岛
+     多形态与通知渠道命名的设计参考（无成段代码移植）；OPPOLeaConnect 只作为
+     v2.2.1 删除 LE Audio 页的判定依据（不含其代码）。
+
+  同步新增 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)：依赖许可表、
+  移植借鉴项目逐项落点表、知识来源、GPL-3.0 合规声明。
+
 ### Changed
 
 - `versionCode` 6 → 7，`versionName` 2.2.2 → 2.2.3
