@@ -1,26 +1,33 @@
-# FiilPods v2.2.3 发布说明
+# FiilPods v3.0.0 发布说明
 
 > 基线：`2aa474f` (v2.1.0) + `d4eb3cf`（README）。
-> 本版在 v2.2.2 基础上做一件事：**修「图标不跟耳机型号走」**——
-> 融合设备中心那台耳机不管接什么型号都显示普通蓝牙耳机图标（第十七节 17.2–17.4：
-> MiLink 拿 FIIL 的假设备 ID 去查小米自家编码表，命不中恒返回 0），
-> 通知栏卡片右侧也永远是同一张通用盒子图（17.5–17.6：广播从来不携带 earType）。
-> 其余为 v2.2.2 及更早的累积说明，原样保留。
-> 不重写架构。断连回路用的是「记账 + 闸门 + 递增冷却」的最小刹车，
-> **不是** 2.2.0 那一套被否掉的熔断器（见 9.5 与 9.8）。
+>
+> **v3.0.0 是版本号收口，不是又一轮改代码。** 功能面与 v2.2.3 完全一致，
+> 差别只在 `versionCode 7 → 8`、`versionName 2.2.3 → 3.0.0`、应用名
+> `FiilPods 2.2 Fix → FiilPods 3.0`，外加顺手改掉一处 fork 遗留
+> （`app_subtitle` 还写着「OPPO 耳机适配 HyperOS」）。
+>
+> 之所以敢升到 3.0.0：从 v2.1.0 到 v2.2.3 这几版修完之后，
+> **模块与系统之间的接入面已经整体搬到了小米自家的 API 上**——
+> 降噪模式的读与写、电量、佩戴、型号、编解码器、通知栏卡片、超级岛、
+> 融合设备中心，读和写都不再走「伪造几个返回值让它看起来能用」的旁路，
+> 而是落在那套系统 API 自己的语义上。19.1 节给出完整的接入面清单。
+>
+> 本文档第三至十八节是 v2.2.x 期间的逐版取证与修法记录，**原样保留**，
+> 它们是 3.0.0 这个接入面的来源。
 
 | 项 | 值 |
 | --- | --- |
-| 应用名 | `FiilPods 2.2 Fix`（`res/values/strings.xml:2`、`res/values-zh-rCN/strings.xml:3`） |
-| versionCode / versionName | 7 / `2.2.3`（`app/build.gradle.kts:38-39` 起） |
-| 改动面 | 本轮 7 files changed（4 改 + 1 新增源文件 + 1 新增测试 + 1 版本号）；累计自 v2.1.0 见下 |
-| 新增文件（本轮） | `app/src/test/java/moe/chenxy/fiilpods/pods/HeadphoneFormFactorTest.kt`（108 行） |
-| 构建 | `testDebugUnitTest` + `assembleDebug` + `assembleRelease` → BUILD SUCCESSFUL（分步执行，见下方说明） |
-| 单测 | suites=5, tests=64, failures=0, errors=0, skipped=0（较 v2.2.2 的 57 项新增 7 项） |
-| 产物 | `dist/FiilPods-v2.2.3-debug.apk`(35,688,080 B)、`dist/FiilPods-v2.2.3-release.apk`(4,543,592 B) |
-| release SHA256 | `F23714F9500DD7CE1EC801305BD0AA03DA70AC03A2821729C731423F4C89844C` |
-| debug SHA256 | `F1D886C65EF46ABFF1B8DA90BF1352A03524A171DDA225A019F68E8A187624C2` |
-| 上一版（v2.2.2）release SHA256 | `897726447F172F307AC8F518314BA778CCFE12CFB646D3D3D806603421C3C24C` |
+| 应用名 | `FiilPods 3.0`（`res/values/strings.xml:2`、`res/values-zh-rCN/strings.xml:3`） |
+| versionCode / versionName | 8 / `3.0.0`（`app/build.gradle.kts:48-49`） |
+| 改动面（相对 v2.2.3） | 5 files：版本号、两处 `strings.xml`（应用名 + `app_subtitle` 遗留）、`CHANGELOG.md`、本文档改名 |
+| 功能面 | 与 v2.2.3 一致，未新增 hook、未改任何协议命令 |
+| 构建 | `testDebugUnitTest` + `assembleRelease -x lintVitalRelease` + `assembleDebug` → BUILD SUCCESSFUL（分步执行，见下方说明） |
+| 单测 | suites=5, tests=64, failures=0, errors=0, skipped=0 |
+| 产物 | `dist/FiilPods-v3.0.0-release.apk`（4,543,588 B）、`dist/FiilPods-v3.0.0-debug.apk`（35,688,076 B） |
+| release SHA256 | `E5B3F1ECF1E71AE1DEBE7C79D8247BB3101DDD990DE19663101C470ACF771B16` |
+| debug SHA256 | `C6F651778A26EA0E9BED2DA78DF17DCCFD8F4E33B6BDD21ABF078647CA6ECA5C` |
+| 上一版（v2.2.3）release SHA256 | `F23714F9500DD7CE1EC801305BD0AA03DA70AC03A2821729C731423F4C89844C` |
 
 > 构建方式说明：**必须用 `clean` 后重建的产物交付**。此前增量构建出的 release 包
 > 虽然源码 mtime 全部早于 APK、内容一致，但 SHA256 与 clean 重建结果不同
@@ -2386,3 +2393,92 @@ putExtra(FiilAction.EXTRA_EAR_TYPE, earType)
     LSPosed 只在进程启动时注入。不重启看到的仍是旧代码，会误判成「没修好」。
 64. **（2.2.3 新增）** 状态栏最左侧的小图标**仍是系统蓝牙图标**，这是**故意**的
     （见 17.7：彩色产品照压成单色剪影在 24dp 下认不出），不要当缺陷报。
+
+65. **（3.0.0 新增）** 安装后看系统「应用信息」→ 版本应为 **`3.0.0`**，
+    桌面图标名应为 **`FiilPods 3.0`**。若仍显示 `2.2 Fix`，说明装的是旧包。
+66. **（3.0.0 新增）** 从 2.2.3 **直接覆盖安装**（不卸载）→ 设置页里「伪装耳机型号」、
+    自定义耳机图、超级岛 / 焦点通知开关**全部保持原样**。
+    `leAudio` 这个已删除字段由 `ignoreUnknownKeys` 自动忽略，不需要清数据。
+67. **（3.0.0 新增）** 覆盖安装后**必须关开一次蓝牙**再看功能项 —— 本次只改了版本号与
+    应用名、没有改 hook，但覆盖安装会重启模块，四个注入进程需重新注入。
+68. **（3.0.0 新增）** 功能面与 2.2.3 **完全一致**：本轮不新增 hook、不改协议命令。
+    若某个功能在 3.0.0 上忽然不工作，先排除「是不是没关开蓝牙」，而不是怀疑本版改坏了。
+69. **（3.0.0 新增）** 设置 →「关于 FiilPods」→ 两组卡片齐全（借鉴组每项带「借鉴了什么」、
+    同作者组四个仓库可点开），这是 2.2.3 的成果，本版不应回退。
+
+---
+
+## 十九、v3.0.0：版本号收口与接入面清单
+
+### 19.1 接入面总表
+
+这是 3.0.0 敢叫「原生态接入」的全部依据 —— 每一行左列是**小米系统自己的入口**，
+右列是它被接到 FIIL 协议的哪一段。**没有一行是「伪造一个返回值让它看起来能用」的旁路**
+（伪装型号那一行是唯一例外，且它是本模块的**功能**而不是绕过手段）。
+
+| 链路 | 系统侧入口（hook 点） | 落到 FIIL 协议 |
+| --- | --- | --- |
+| 设备识别 | `MiuiBluetoothService.checkSupport`、`isK77sHeadset`、`MxBluetoothManager.getDeviceId` | 伪装型号 `fakeDeviceId`（设置页可改） |
+| 降噪模式 · 读 | `MxBluetoothManager.getAncState`、`AncBatteryController.getAncState`、`ProfileContext.getAncState` | `FiilRfcommController.ancMode` |
+| 降噪模式 · 写 | `MxBluetoothManager.setAncStateBlock`、`openAnc`、`closeAnc`、`openTransparent` | `setAnc` → RFCOMM `cid=44` |
+| 面板刷新 | `AncBatteryController.notifyPropertyChanged`（`postDelayed` 到官方 `system_broadcast` Handler） | 写后回推 + 双侧待确认窗口 |
+| 电量 | `ACTION_PODS_BATTERY_CHANGED` 的 `left` / `right` / `case` extras | MAF 电量回包 |
+| 佩戴 | `MxBluetoothManager.getWearStatus` | 耳机侧佩戴上报 |
+| 编解码器 | `A2dpService.setCodecConfigPreference`（手机侧）+ 耳机侧 `cid=1 cmdId=13` | LDAC 开关 `143` / 解锁 `142` |
+| 融合中心图标 | `BluetoothServiceClient.getHeadsetType` | `earType` → 7 头戴式 / 3 普通 |
+| 通知栏与超级岛 | `MiuiBluetoothNotification`（构造器两重载 / `BluetoothHeadsetService.onCreate` / `Application.attach` 三通道） | 焦点通知 + 型号产品图 |
+| 系统设置原生页 | `SettingsHook`（`setCommonCommand` 等 6 条） | 通用命令回包 |
+
+### 19.2 为什么这一版值得一个 3.0.0
+
+2.x 期间每一版都在修「某一条链路在某种机型 / 某个系统版本上不生效」，
+根因反复是同一类：**模块与系统各记一份状态**，同步靠猜。
+到 2.2.3 为止，这一类问题的最后一个已知实例（融合中心图标）也收口了 ——
+系统那侧读到的值，已经是 FIIL 那侧真实的值，而不是模块替它编的。
+
+所以 3.0.0 的定义是：**接入面稳定了，剩下来的是兼容性维护，不是结构补丁。**
+功能面与 2.2.3 一致，因此本版不包含任何新 hook —— 这正是它作为大版本基线的意义。
+
+### 19.3 已知限制（与 17.7、18.64 一致）
+
+- 状态栏最左侧的小图标仍是系统蓝牙图标，理由见 17.7。
+- 跨进程一致性依赖 LSPosed 注入时机，装完必须关开蓝牙一次。
+- FIIL 各型号固件的 `cid` / `cmdId` 支持面不同（例如 `earType` 不在 LDAC 白名单的型号
+  本来就没有 LDAC），这不是模块的缺陷。
+
+### 19.4 v3.0.0 产物
+
+| 项 | 值 |
+| --- | --- |
+| `dist/FiilPods-v3.0.0-release.apk` | **4,543,588 B** / SHA-256 `E5B3F1ECF1E71AE1DEBE7C79D8247BB3101DDD990DE19663101C470ACF771B16` |
+| `dist/FiilPods-v3.0.0-debug.apk` | **35,688,076 B** / SHA-256 `C6F651778A26EA0E9BED2DA78DF17DCCFD8F4E33B6BDD21ABF078647CA6ECA5C` |
+| `aapt2 dump badging` | `versionCode='8' versionName='3.0.0'`、`application-label:'FiilPods 3.0'` |
+| APK 结构 | release 112 entries / 29 个 `.webp`；debug 167 entries / 31 个 `.webp` |
+
+与 v2.2.3 相比两个包各**小了 4 字节**，差异只来自应用名与 `app_subtitle` 的字符串变短
+（`FiilPods 2.2 Fix` → `FiilPods 3.0`、`OPPO 耳机适配 HyperOS` → `FIIL 耳机适配 HyperOS`）。
+资源条目数、webp 张数、dex 内容与 v2.2.3 完全一致 —— 这也从侧面证明「只改了版本号与名字」。
+
+dex 抽查（release 包 `classes.dex` 直接搜字符串）：`getHeadsetType`、`ear_type`、
+`headset_ldac_enabled` / `headset_ldac_known` / `headset_ldac_unlocked`、
+`ACTION_PODS_BATTERY_CHANGED`、`01010607` 全部命中，与 v2.2.3 一致。
+
+**本轮 release 构建的一次失败与恢复。** 第一次 `assembleRelease -x lintVitalRelease`
+（`-Xmx1500m` + 独立 Kotlin 编译 daemon）在 `generateReleaseResources` 之后
+**Gradle daemon 整个退出**，`hs_err_pid26212.log` 首行原文：
+
+```
+# There is insufficient memory for the Java Runtime Environment to continue.
+# Native memory allocation (malloc) failed to allocate 1560784 bytes. Error detail: Chunk::new
+```
+
+当时机器 16,027 MB 内存只剩 **2,708 MB** 空闲（上一轮遗留的 Kotlin 编译 daemon 独占 1,152 MB）。
+处理：结束那个空闲的 Kotlin daemon（Gradle 需要时会自动重启，无副作用）→ 空闲回升到 3,979 MB →
+改用 `-Pkotlin.compiler.execution.strategy=in-process`（编译在 Gradle 进程内完成，全程只存在一个 JVM）
++ `-Xmx1800m` 重跑 → BUILD SUCCESSFUL。
+
+**这是构建机内存约束，不是代码问题。** 本机出包时不要再并行跑其它吃内存的程序；
+`lintVitalRelease` 依旧跳过（它只是静态检查，不参与 APK 产物构建）。
+
+
+

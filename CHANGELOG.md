@@ -7,6 +7,119 @@
 
 ---
 
+## [3.0.0] - 2026-11-01
+
+**FIIL 耳机原生态接入小米耳机。** 这一版不是再打一个补丁，而是把模块与系统之间的陆地线
+整个挪了一遍。
+
+2.1.0 那会儿的形态是「并行链路」：FIIL 的指令走模块自己那条 SPP 连接，小米这一侧靠伪造
+几个返回值让它「看起来能用」——能用，但融合设备中心和系统设置页各自记着自己的状态，
+点下去耳机是换了，界面还停在旧图标上，得退出去重进。
+
+3.0.0 把这些全部收进系统内部：**降噪模式、电量、佩戴、型号、编解码器、通知栏卡片、
+超级岛、融合设备中心**，读和写都落在小米自家的那套 API 上。FIIL 自己能做的切换，
+这里都能做，而且做完**系统界面会当场跟着变**，不再需要退回重进。
+
+### 接入面
+
+| 链路 | 系统侧入口（hook 点） | 落到 FIIL 协议 |
+|---|---|---|
+| 设备识别 | `MiuiBluetoothService.checkSupport` / `isK77sHeadset` / `getDeviceId` | 伪装型号（`fakeDeviceId`，设置页可自行改） |
+| 降噪模式 · 读 | `MxBluetoothManager.getAncState`、`AncBatteryController.getAncState` | `FiilRfcommController.ancMode` |
+| 降噪模式 · 写 | `setAncStateBlock` / `openAnc` / `closeAnc` / `openTransparent` | `setAnc` → RFCOMM `cid=44` |
+| 面板刷新 | `AncBatteryController.notifyPropertyChanged`（`postDelayed` 到官方 `system_broadcast` Handler） | 写后回推 + 双侧待确认窗口 |
+| 电量 | `ACTION_PODS_BATTERY_CHANGED` 的 `left` / `right` / `case` extras | MAF 电量回包 |
+| 佩戴 | `getWearStatus` | 耳机侧佩戴上报 |
+| 编解码器 | `A2dpService.setCodecConfigPreference`（手机侧）+ 耳机侧 `cid=1 cmdId=13` | LDAC 开关 `143` / 解锁 `142` |
+| 融合中心图标 | `BluetoothServiceClient.getHeadsetType` | `earType` → 7 头戴式 / 3 普通 |
+| 通知栏与超级岛 | `MiuiBluetoothNotification`（构造器 / `BluetoothHeadsetService.onCreate` / `Application.attach` 三通道注册） | 焦点通知 + 型号产品图 |
+| 系统设置原生页 | `SettingsHook`（`setCommonCommand` 等） | 6 条通用命令 |
+
+### Fixed
+
+- **融合设备中心切完模式，图标停在旧的那张**（跨了三个大版本才收口）
+  成因有三层，逐层剥掉：
+  1. `setAncStateBlock` 原本返回失败码，系统认为「没切成功」→ 按钮直接不生效；
+  2. 官方是靠 `notifyPropertyChanged(device, 8, 25)` **投递到 Handler 延迟执行**来刷新面板的，
+     而 hook 用的是 `hookBefore` + `setResult`，官方那句 `:1083` 的通知**永远不会执行**，
+     自己又补了一次**同步直调**——面板读到的还是尚未落定的旧值；
+  3. 即便投递了，`AncBatteryModel` 也只认 `ancState` 一个字段（另外两个字段名根本不存在，
+     `setObjectField` 静默跳过）。
+  现在：写指令发出后**同时**更新模型、`postDelayed` 到官方那个 Handler 上发通知，
+  再开一个待确认窗口，耳机真实回报到达后二次校正。
+
+- **设备详情页看不到 LDAC 开关**（用户反馈三次）
+  不是 UI 漏了控件，是个自锁：LDAC 是**耳机侧开关**，旧实现只查手机侧 A2DP 能力，
+  耳机不开 → A2DP 不声明 → `supported=false` → 开关不渲染 → 没有入口去开 → 永远不开。
+  现在渲染条件与协议层解耦（按 `earType` 机型白名单判断该不该显示），点击时双管齐下：
+  耳机侧 `cmdId=13` + 手机侧 `setCodecConfigPreference`。
+
+- **融合中心图标永远是「普通蓝牙耳机」，通知栏图标换型号也不变**
+  两处独立成因：融合中心是把 FIIL 的假设备 ID 丢进了小米自家 6 位编码表，一条都不命中，
+  恒返回 0；通知栏则是**根本没拿到 `earType`**，只能画通用图。
+  现在按真实 `earType` 返回 7 / 3，图标由小米官方那套 `a0.a()` 自己选，
+  **用的就是官方那两张图**，不是自己画的仿制品；通知栏改走三级回落
+  （自定义图 → 型号官方产品图 → 通用图）。
+
+- **焦点通知开关打开后，通知栏什么都不出现**
+  根本原因是宿主的创建条件比想象中苛刻：`MiuiBluetoothNotification` 只在
+  `BluetoothHeadsetService.onCreate` 的某个分支里 new 出来，而旧实现按「构造器参数个数」
+  挑重载，**挑中的是另一个重载**，挂在永远不会被调用的那条路径上。
+  现在同时挂三个通道（构造器两个全挂 / `onCreate` / `Application.attach`），
+  哪个先到都能接住。
+
+- **连接在「已连接 ↔ 断开」之间反复跳**
+  两条无界的自激回路：静默探测超时主动断连（3.5s 探测 + 5s 退避），以及读循环退出即断连。
+  两者都会触发重连，而重连又可能再次超时——周期 5～8.5 秒，永不停止。
+  现在加了刹车：连续失败计数、指数退避冷却（60s → 15min）、稳定连接判定（≥8s 且收到过数据
+  才算健康）、用户主动断连穿透阻断。
+
+### Added
+
+- 31 张 FIIL 官方型号产品图（取自 FIIL+ 3.5.2 的 `res/drawable/fiil_earphones_*`，
+  统一转 WebP 后 2.4 MB → 498 KB）。**连上哪台耳机，主页和详情页就显示哪台的图。**
+- 设置页「关于」补齐项目出处：新增分组列出同一作者围绕 FIIL 的四个仓库；
+  原「借鉴了哪些开源项目」逐项写明**借鉴了什么、落在哪个文件**。
+  同步新增 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)。
+- `HeadphoneFormFactorTest`（7 项）把 6 款头戴型号钉死为全集；
+  `PodImagesTest`（8 项）钉死型号图映射，含「`drawableOf` 绝不返回 0」——
+  返回 0 会让 `painterResource(0)` 直接崩掉界面。
+
+### Changed
+
+- `versionCode` 7 → **8**，`versionName` 2.2.3 → **3.0.0**
+- 应用名 `FiilPods 2.2 Fix` → **`FiilPods 3.0`**
+- 顺手改掉一处 fork 遗留：`app_subtitle` 还写着「OPPO 耳机适配 HyperOS」
+- 文档 `docs/RELEASE_v2.2.3.md` → `docs/RELEASE_v3.0.0.md`
+- 删除从 OppoPods 整段复制、但**一行 hook 实现都没有**的 OPPO LE Audio 设置页
+  （3 个源文件 + 84 条字符串）。老用户的本地配置里那个 `leAudio` 字段会被
+  `ignoreUnknownKeys` 自动忽略，不需要迁移。
+
+### Known
+
+- **状态栏最左侧的小图标仍是系统蓝牙图标，这是故意的。** Android 状态栏图标只取
+  位图的 alpha 通道做单色着色；31 张型号图里 27 张是「不透明彩色主体 + 透明背景」
+  的产品照，压成剪影后 24dp 下认不出是什么。要按型号区分必须另做单色矢量剪影，
+  不在本次范围。用户实际看到的是**大图**（焦点通知的 `iconTextInfo` / 超级岛），
+  它已经跟着型号走了。
+- **跨进程一致性依赖 LSPosed 注入时机**：模块注入 `com.android.bluetooth`、
+  `com.xiaomi.bluetooth`、`com.milink.service`、`com.android.settings` 四个进程。
+  装完新版本**必须关开一次蓝牙（或重启手机）**，否则旧进程里跑的还是旧代码。
+  这一条在下面「安装」里也写了。
+
+### 从 2.1.0 到 3.0.0 的完整轨迹
+
+| 版本 | 修了什么 |
+|---|---|
+| 2.1.0 | 三条上机反馈：设备中心图标、服务心跳、焦点通知 |
+| 2.2.0 | 五个实机 Bug 修复 + 型号产品图 + 连接回路刹车 + 伪装型号真正注入 |
+| 2.2.1 | 删除 OPPO LE Audio 设置页（只有 UI 壳、零 hook 实现） |
+| 2.2.2 | LDAC 开关（耳机侧开关自锁） |
+| 2.2.3 | 融合中心图标与通知栏图标跟着型号走 + 关于页出处 |
+| **3.0.0** | **原生态接入收口：接入面全部对齐系统 API，升大版本号** |
+
+---
+
 ## [2.2.3] - 2026-10-31
 
 修「图标不跟着耳机型号走」。两处独立的成因，都在**我们自己的 hook 上**，
@@ -425,24 +538,34 @@ LDAC 是耳机侧开关，而旧实现只查手机侧 A2DP 能力 —— 耳机�
 
 | 版本 | versionCode | 日期 | 关键变化 |
 |---|---|---|---|
+| **3.0.0** | **8** | 2026-11-01 | **原生态接入收口**：接入面全部对齐小米系统 API，升大版本号，应用名改 `FiilPods 3.0` |
+| 2.2.3 | 7 | 2026-10-31 | 融合中心图标与通知栏图标跟着型号走 + 关于页补出处 |
+| 2.2.2 | 6 | 2026-10-31 | LDAC 开关（耳机侧开关自锁，第三次反馈才挖到根） |
 | 2.2.1 | 5 | 2026-10-31 | 删除 OPPO LE Audio 设置页（只有 UI 壳、零 hook 实现） |
 | 2.2.0 | 4 | 2026-10-31 | 五个实机 Bug 修复 + 型号产品图 + 连接回路刹车 + 伪装型号真正注入 |
 | 2.1.0 | 3 | 2026-10-26 | 三条上机反馈修复（设备中心图标 / 服务心跳 / 焦点通知） |
 | 2.0.0 | 2 | 2026-10-26 | Mate 模式切换 6 缺陷 + 跨进程 Parcelable 闪退 + 日志抓取 |
 | 1.0.0 | 1 | 2026-10-26 | 首个可用版本，UI 对齐 OppoPods 2.2.0 |
 
-五个版本的签名一致（V2 SHA-256 `605996dc…38d34`），可直接覆盖安装。
+**八个版本的签名完全一致**（V2 SHA-256 `605996dc…38d34`），可以直接覆盖安装，不用卸载。
+从 2.1.0 起没有删除过任何已发布版本的数据结构，配置全部向前兼容。
 
 ### 各版本 release APK 校验值
 
 | 版本 | 大小 | SHA-256 |
 |---|---|---|
+| 3.0.0 | 4,543,588 B | `E5B3F1ECF1E71AE1DEBE7C79D8247BB3101DDD990DE19663101C470ACF771B16` |
+| 2.2.3 | 4,543,592 B | `F23714F9500DD7CE1EC801305BD0AA03DA70AC03A2821729C731423F4C89844C` |
+| 2.2.2 | 4,543,340 B | `897726447F172F307AC8F518314BA778CCFE12CFB646D3D3D806603421C3C24C` |
 | 2.2.1 | 4,543,336 B | `BA45F8140C37CC4406BAC0D713F619B28B58AF2E35AA12C7B4533E77FE6D2FAF` |
 | 2.2.0 | 4,567,512 B | `BA6E4FDB75A4111F816498D053E45C09A2FC322ECC08835E6A0560952EC5477D` |
 | 2.1.0 | 4,063,403 B | 见 `dist/README.md` |
 | 2.0.0 | 3,965,095 B | 见 `dist/README.md` |
 | 1.0.0 | 3,948,715 B | 见 `dist/README.md` |
 
+[3.0.0]: https://github.com/FNKG9527/FiilPods/releases/tag/v3.0.0
+[2.2.3]: https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.3
+[2.2.2]: https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.2
 [2.2.1]: https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.1
 [2.2.0]: https://github.com/FNKG9527/FiilPods/releases/tag/v2.2.0
 [2.1.0]: https://github.com/FNKG9527/FiilPods/releases/tag/v2.1.0

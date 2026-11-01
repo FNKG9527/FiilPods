@@ -10,7 +10,7 @@
 
 <div align="center">
 
-![Release](https://img.shields.io/badge/Release-2.2.3-4B8BF5?style=flat-square)
+![Release](https://img.shields.io/badge/Release-3.0.0-4B8BF5?style=flat-square)
 ![Downloads](https://img.shields.io/github/downloads/FNKG9527/FiilPods/total?style=flat-square&color=34C759)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Framework](https://img.shields.io/badge/Framework-LSPosed-FF6B6B?style=flat-square)
@@ -57,7 +57,7 @@ The UI and settings mirror [OPPOPods](https://github.com/1812z/OppoPods) 2.2.0 �
 | 💡 **[Implementation](docs/IMPLEMENTATION.md)** | Injection / dual transport / protocol routing / settings injection |
 | 📡 **[Protocol tables](docs/PROTOCOL_FIIL.md)** | UUIDs, 190 GAIA commands, Mate cid/cmd |
 | 🧪 **[Device test log](docs/DEVICE_TEST.md)** | 19 on-device test cases |
-| 📝 **[Changelog](CHANGELOG.md)** | 1.0.0 → 2.2.3, complete history |
+| 📝 **[Changelog](CHANGELOG.md)** | 1.0.0 → 3.0.0, complete history |
 | ⚖️ **[Third-party & borrowed code](THIRD_PARTY_LICENSES.md)** | Dependency licenses, exactly which open-source projects were ported and where, protocol sources |
 
 > The protocol documentation is currently Chinese-only.
@@ -277,7 +277,7 @@ boilerplate; it is an obligation under GPL-3.0, and it helps anyone following th
   device. The repository **contains no APKs and no decompiled artifacts**, only conclusions and redacted logs.
   The v2.2.3 icon fix was settled along the same path: `BluetoothServiceClient.getHeadsetType`'s three-statement
   body, the Xiaomi six-digit code checks in `vg/a.b(String)`, and the packed-switch icon table in `a0.smali`, all
-  cited with `file:line` (see section 17 of `docs/RELEASE_v2.2.3.md`).
+  cited with `file:line` (see section 17 of `docs/RELEASE_v3.0.0.md`).
 - **MiLink (`com.milink.service`) 18.2.0.12** — the system-side implementation behind HyperConnect and Smart Island,
   and the object of investigation for questions like "why doesn't the icon follow the model" and "why does the icon
   stick to the old value when switching modes".

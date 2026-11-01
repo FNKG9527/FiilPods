@@ -45,8 +45,13 @@ android {
         //      焦点通知大图改走 `PodImageLoader.loadModelBoxBitmap`（自定义图 →
         //      型号官方图 → 通用图）。之前只有「自定义 or 通用盒子图」，所以接什么
         //      型号都长一样。
-        versionCode = 7
-        versionName = "2.2.3"
+        // v3.0.0：全新大版本。功能面与 v2.2.3 一致（不再新增 hook），
+        //   仅升版本号 + 应用名改为 "FiilPods 3.0"，用来给「FIIL 耳机原生态接入
+        //   小米耳机」这条链路立一个正式基线：融合设备中心的模式切换/图标、
+        //   系统级降噪读写、通知栏与超级岛、LDAC、伪装型号、电量与佩戴，
+        //   全部走小米自家的那套 API，FIIL 自己的功能也都能正常使用与切换。
+        versionCode = 8
+        versionName = "3.0.0"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 
