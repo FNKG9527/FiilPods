@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">FiilPods 3.1</string>
+    <string name="app_name">FiilPods 3.2</string>
     <string name="app_subtitle">FIIL Earphones for HyperOS</string>
     <string name="pod_info">Pod Info</string>
     <string name="about">About FiilPods</string>
@@ -117,6 +117,12 @@
     <string name="log_level_off">Off</string>
     <string name="log_level_basic">Basic</string>
     <string name="log_level_debug">Debug</string>
+    <string name="export_log">Export Logs</string>
+    <string name="export_log_summary">Last 60 minutes (max 2 MB) plus crash record and current settings, saved as a txt file</string>
+    <string name="export_log_running">Exporting…</string>
+    <string name="export_log_done">Exported %1$d log lines (%2$s)</string>
+    <string name="export_log_failed">Export failed: %1$s</string>
+    <string name="export_log_share_title">Share log file</string>
     <string name="hide_desktop_icon">Hide Desktop Icon</string>
     <string name="hide_desktop_icon_summary">Hide the launcher icon; open from module manager after hiding</string>
     <string name="cycle_anc">Cycle ANC</string>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「导出日志」的 FileProvider 路径声明。
+
+  两条都必须有，因为 LogExporter.outputDir() 会先试外部私有目录
+  （用户能用文件管理器 / USB 直接取走），拿不到才退回内部 filesDir。
+  只声明其中一条时，另一条路径上的文件会让 getUriForFile 抛
+  IllegalArgumentException: Failed to find configured root。
+-->
+<paths>
+    <!-- context.getExternalFilesDir("logs") → Android/data/<包名>/files/logs -->
+    <external-files-path
+        name="export_logs"
+        path="logs/" />
+
+    <!-- context.filesDir/logs 兜底 -->
+    <files-path
+        name="internal_export_logs"
+        path="logs/" />
+</paths>

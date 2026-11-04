@@ -16,7 +16,9 @@ dist/
 
 | 版本 | 产物 | 大小 | 下载 |
 |---|---|---|---|
-| **v3.1.0**（最新） | `FiilPods-v3.1.0-release.apk` | 4.33 MB | [Release v3.1.0](https://github.com/FNKG9527/FiilPods/releases/tag/v3.1.0) |
+| **v3.2.0**（最新） | `FiilPods-v3.2.0-release.apk` | 4.35 MB | [Release v3.2.0](https://github.com/FNKG9527/FiilPods/releases/tag/v3.2.0) |
+| v3.2.0 | `FiilPods-v3.2.0-debug.apk` | 34.09 MB | 同上（排查问题用，含完整日志） |
+| v3.1.0 | `FiilPods-v3.1.0-release.apk` | 4.33 MB | [Release v3.1.0](https://github.com/FNKG9527/FiilPods/releases/tag/v3.1.0) |
 | v3.1.0 | `FiilPods-v3.1.0-debug.apk` | 34.03 MB | 同上（排查问题用，含完整日志） |
 | v3.0.0 | `FiilPods-v3.0.0-release.apk` | 4.33 MB | [Release v3.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v3.0.0) |
 | v3.0.0 | `FiilPods-v3.0.0-debug.apk` | 34.03 MB | 同上（排查问题用，含完整日志） |
@@ -35,7 +37,7 @@ dist/
 | v1.0.0 | `FiilPods-v1.0.0-release.apk` | 3.77 MB | [Release v1.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v1.0.0) |
 | v1.0.0 | `FiilPods-v1.0.0-debug.apk` | 46.20 MB | 同上 |
 
-九个版本的**签名完全一致**（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`）。
+十个版本的**签名完全一致**（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`）。
 
 ⚠️ **3.1.0 是例外**：为了上架 LSPosed 官方模块仓库，它的包名从 `moe.chenxy.fiilpods` 改成了
 `io.github.fnkg9527.fiilpods`（LSPosed 要求 applicationId 反推的域名归提交者所有）。
@@ -46,6 +48,7 @@ dist/
 
 | 版本 | release | debug |
 |---|---|---|
+| v3.2.0 | `DD138A80D1D6FA12612F303E5E69D4DEC66AE272A88389455F9AA1D7272213C3` | `8C9D177871011ACAAC52E3B00CD19DCE598660B96895CD28D7C398A0DD849B4A` |
 | v3.1.0 | `E9437CC3682F8152F080B46643174CDEF57278B211752CFABEC1ACCADD4E4FE0` | `68A296F989085AAA33F8C1A023BBB09B78EA63E98086FF4203DB19FE200EE42D` |
 | v3.0.0 | `E5B3F1ECF1E71AE1DEBE7C79D8247BB3101DDD990DE19663101C470ACF771B16` | `C6F651778A26EA0E9BED2DA78DF17DCCFD8F4E33B6BDD21ABF078647CA6ECA5C` |
 | v2.2.3 | `F23714F9500DD7CE1EC801305BD0AA03DA70AC03A2821729C731423F4C89844C` | `F1D886C65EF46ABFF1B8DA90BF1352A03524A171DDA225A019F68E8A187624C2` |

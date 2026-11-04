@@ -60,8 +60,14 @@ android {
         //   java_init.list、manifest 相对类名、R 全部无需改动），只把
         //   applicationId / provider authority / 广播 action 前缀 / MODULE_PACKAGE
         //   这几处「运行时身份」换成新值。
-        versionCode = 9
-        versionName = "3.1.0"
+        // v3.2.0：设置页新增「导出日志」。
+        //   蓝牙进程持有真正的连接（socket 在 com.android.bluetooth），日志主体都写在
+        //   那边，UI 进程读不到；用 PodImageProvider.call("appendLog") 攒批转发过来
+        //   （20 行或 1 秒一次），比广播可靠——广播只有在 UI 进程活着时才有人接，
+        //   用户没打开 App 的那段时间日志会静默丢掉。
+        //   导出内容：最近 60 分钟 + 崩溃记录 + 当前设置，上限 2 MiB，txt，可分享。
+        versionCode = 10
+        versionName = "3.2.0"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 

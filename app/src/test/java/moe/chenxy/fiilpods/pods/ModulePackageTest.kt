@@ -2,6 +2,7 @@ package moe.chenxy.fiilpods.pods
 
 import moe.chenxy.fiilpods.BuildConfig
 import moe.chenxy.fiilpods.config.PodImagePrefs
+import moe.chenxy.fiilpods.utils.LogFileProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -45,6 +46,16 @@ class ModulePackageTest {
         assertEquals(
             "${BuildConfig.APPLICATION_ID}.podimages",
             PodImagePrefs.AUTHORITY,
+        )
+        // 「导出日志」的 FileProvider 走同一个命名规则。它必须是 exported=false，
+        // 且 authority 不能与上面那个撞车，否则 manifest 合并直接失败。
+        assertEquals(
+            "${BuildConfig.APPLICATION_ID}.logs",
+            LogFileProvider.AUTHORITY,
+        )
+        assertTrue(
+            "两个 provider 的 authority 不能相同",
+            LogFileProvider.AUTHORITY != PodImagePrefs.AUTHORITY,
         )
     }
 

@@ -78,6 +78,22 @@
             android:exported="true"
             android:grantUriPermissions="false" />
 
+        <!-- 「导出日志」用的 FileProvider。
+             Android 7 起把 file:// 交给别的应用会抛 FileUriExposedException，
+             必须用 content:// + 临时授权。
+             exported=false：只有本应用能申请授权，别的应用拿不到日志文件。
+             paths 声明的两个目录对应 LogExporter.outputDir() 的两条回落路径
+             （外部私有目录优先，不可用时退回内部 filesDir）。 -->
+        <provider
+            android:name=".utils.LogFileProvider"
+            android:authorities="io.github.fnkg9527.fiilpods.logs"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/log_export_paths" />
+        </provider>
+
         <!-- Set as Xposed Module -->
         <meta-data
             android:name="xposedmodule"

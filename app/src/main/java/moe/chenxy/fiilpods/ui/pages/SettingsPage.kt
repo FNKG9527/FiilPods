@@ -1,5 +1,7 @@
 package moe.chenxy.fiilpods.ui.pages
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
@@ -17,14 +19,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import moe.chenxy.fiilpods.R
 import moe.chenxy.fiilpods.config.ConfigManager
 import moe.chenxy.fiilpods.ui.AppLocale
+import moe.chenxy.fiilpods.utils.LogExporter
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -147,6 +155,10 @@ fun SettingsPage(
             )
         )
     }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val exporting = remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(
@@ -286,6 +298,71 @@ fun SettingsPage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                )
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.padding(top = 12.dp)) {
+                BasicComponent(
+                    title = stringResource(R.string.export_log),
+                    summary = if (exporting.value) {
+                        stringResource(R.string.export_log_running)
+                    } else {
+                        stringResource(R.string.export_log_summary)
+                    },
+                    onClick = {
+                        if (!exporting.value) {
+                            exporting.value = true
+                            // 导出要读文件、拼几 MB 的字符串，必须离开主线程，
+                            // 否则调试日志已经攒满 512 KB 时点一下就会明显卡界面。
+                            coroutineScope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    LogExporter.export(context)
+                                }
+                                exporting.value = false
+                                result.fold(
+                                    onSuccess = { export ->
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(
+                                                R.string.export_log_done,
+                                                export.logLines,
+                                                LogExporter.humanBytes(export.bytes),
+                                            ),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                        // 分享面板让用户直接把 txt 发出去；没有可分享的
+                                        // 应用时（极简系统）只保留上面的 Toast，不崩。
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent.createChooser(
+                                                    LogExporter.shareIntent(context, export.file),
+                                                    context.getString(R.string.export_log_share_title),
+                                                )
+                                            )
+                                        }
+                                    },
+                                    onFailure = { error ->
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(
+                                                R.string.export_log_failed,
+                                                error.message ?: error.javaClass.simpleName,
+                                            ),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    },
+                                )
+                            }
+                        }
+                    },
+                    endActions = {
+                        Icon(
+                            imageVector = MiuixIcons.Basic.ArrowRight,
+                            contentDescription = null,
+                        )
+                    },
                 )
             }
         }
