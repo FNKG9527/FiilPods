@@ -48,7 +48,11 @@ import moe.chenxy.fiilpods.config.ConfigManager
 import moe.chenxy.fiilpods.config.PodImagePrefs
 import moe.chenxy.fiilpods.config.PodImageResource
 import moe.chenxy.fiilpods.pods.NoiseControlMode
+import moe.chenxy.fiilpods.pods.ancModeFromWire
+import moe.chenxy.fiilpods.pods.toWireMode
 import moe.chenxy.fiilpods.pods.FiilCodec
+import moe.chenxy.fiilpods.pods.FiilAction
+import moe.chenxy.fiilpods.pods.FiilStatus
 import moe.chenxy.fiilpods.pods.FiilModels
 import moe.chenxy.fiilpods.pods.OppoCompatBridge
 import moe.chenxy.fiilpods.pods.EqDevicePreset
@@ -487,6 +491,27 @@ fun MainUI(
                         ldacUnlocked.value = false
                     }
 
+                    FiilAction.ACTION_STATE -> {
+                        val status = FiilStatus.fromJson(p1.getStringExtra(FiilAction.EXTRA_JSON))
+                        status.address?.let { connectedDeviceAddress = it }
+                        status.name?.let { mainTitle.value = it }
+                        if (status.earType > 0) {
+                            productId.value = status.earType.toString()
+                            connectedEarType.intValue = status.earType
+                        }
+                        ancModeFromWire(status.isMate, status.ancMode)?.let { ancMode.value = it }
+                        lowLatencyMode.value = status.lowLatencyLevel
+                        spatialAudioMode.value = if (status.cinemaMode) 1 else 0
+                        dualDeviceConnection.value = status.multipoint
+                        if (status.toneVolume >= 0) toneVolume.value = status.toneVolume
+                    }
+
+                    FiilAction.ACTION_OP_FAILED -> {
+                        val label = p1.getStringExtra(FiilAction.EXTRA_CMD)
+                            .orEmpty().ifBlank { context.getString(R.string.unknown_device) }
+                        Toast.makeText(context, context.getString(R.string.operation_failed, label), Toast.LENGTH_SHORT).show()
+                    }
+
                     OppoPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE -> {
                         lastBluetoothServiceAliveMs = SystemClock.elapsedRealtime()
                         bluetoothServiceResponsive = true
@@ -534,6 +559,8 @@ fun MainUI(
             addAction(OppoPodsAction.ACTION_PODS_CONNECTION_STATE_CHANGED)
             addAction(OppoPodsAction.ACTION_PODS_DISCONNECTED)
             addAction(OppoPodsAction.ACTION_MODULE_BLUETOOTH_SERVICE_ALIVE)
+            addAction(FiilAction.ACTION_STATE)
+            addAction(FiilAction.ACTION_OP_FAILED)
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
             addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         }, Context.RECEIVER_EXPORTED)
@@ -574,19 +601,8 @@ fun MainUI(
 
     fun setAncMode(mode: NoiseControlMode) {
         ancMode.value = mode
-        // FIIL 用 MAF 线值 0~4（关闭/降噪/开放/兼听/风中），不是 OPPO 的 1~8 状态码。
-        val status = when (mode) {
-            NoiseControlMode.OFF -> 0
-            NoiseControlMode.NOISE_CANCELLATION -> 1
-            NoiseControlMode.TRANSPARENCY -> 2
-            NoiseControlMode.LISTEN -> 3
-            NoiseControlMode.WIND -> 4
-            NoiseControlMode.ADAPTIVE,
-            NoiseControlMode.NOISE_CANCELLATION_SMART,
-            NoiseControlMode.NOISE_CANCELLATION_LIGHT,
-            NoiseControlMode.NOISE_CANCELLATION_MEDIUM,
-            NoiseControlMode.NOISE_CANCELLATION_DEEP -> 1
-        }
+        // The broadcast transports a protocol-specific raw value, not a UI status.
+        val status = mode.toWireMode(connectedEarType.intValue)
         Intent(OppoPodsAction.ACTION_ANC_SELECT).apply {
             this.putExtra("status", status)
             setPackage("com.android.bluetooth")

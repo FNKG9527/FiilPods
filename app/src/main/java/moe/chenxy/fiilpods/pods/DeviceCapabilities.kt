@@ -96,9 +96,14 @@ fun detectDeviceCapabilities(earType: Int): DeviceCapabilities {
  * 兼容重载：OppoPods 的 UI 传的是 (context, deviceName, productId)。
  * FIIL 侧没有 productId，直接用型号名反查 earType。
  */
-@Suppress("UNUSED_PARAMETER")
 fun detectDeviceCapabilities(
     context: android.content.Context? = null,
     deviceName: String,
     productId: String? = null,
-): DeviceCapabilities = detectDeviceCapabilities(FiilModels.earTypeOfName(deviceName))
+): DeviceCapabilities {
+    val nameType = FiilModels.earTypeOfName(deviceName)
+    // GET_EARTYPE/productId 是当前连接耳机自己回报的型号；名字可能是缓存、别名或
+    // 用户改名后的旧型号名，绝不能覆盖协议真值。只有 productId 缺失/非法才回退名称。
+    val earType = productId?.toIntOrNull()?.takeIf { it > 0 } ?: nameType
+    return detectDeviceCapabilities(earType)
+}

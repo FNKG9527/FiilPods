@@ -83,7 +83,7 @@ object OppoCompatBridge {
     }
 
     /** 上一次广播的值，用于变化检测，避免状态刷新时刷屏。 */
-    private var lastAnc: Int = Int.MIN_VALUE
+    private var lastAnc: Pair<Boolean, Int>? = null
     private var lastBattery: String = ""
     private var lastWear: String = ""
     private var lastGameMode: Boolean? = null
@@ -98,15 +98,6 @@ object OppoCompatBridge {
     private var lastLdac: String? = null
     private var lastConnected: Boolean? = null
     private var lastState: String = ""
-
-    /** 状态里的 `ancMode` 是 MAF 线值 0~4；OppoPods UI 的 `status` 也按 1 基状态码解析。 */
-    private fun ancStatusForUi(maf: Int): Int = when (maf) {
-        1 -> 2   // 降噪
-        2 -> 3   // 开放/通透
-        3 -> UI_STATUS_LISTEN   // 兼听
-        4 -> UI_STATUS_WIND     // 风中
-        else -> 1 // 关闭
-    }
 
     private fun send(ctx: Context, action: String, fill: Intent.() -> Unit) {
         runCatching {
@@ -180,8 +171,7 @@ object OppoCompatBridge {
                 send(ctx, OppoPodsAction.ACTION_PODS_CONNECTED) {
                     putExtra("address", s.address.orEmpty())
                     putExtra("device_name", s.name.orEmpty())
-                    // OppoPods 用 productId 查机型表；FIIL 没有 productId，
-                    // 这里把 earType 塞进去，MainUI 的 detectDeviceCapabilities 会忽略它。
+                    // OppoPods 用 productId 查机型表；FIIL 这里传 earType，供改名设备识别。
                     putExtra("product_id", s.earType.toString())
                 }
                 lastState = "connected"
@@ -203,11 +193,15 @@ object OppoCompatBridge {
     }
 
     private fun publishAnc(ctx: Context, s: FiilStatus, force: Boolean) {
-        if (force || lastAnc != s.ancMode) {
-            lastAnc = s.ancMode
+        // The same raw value means different things on Mate and GAIA. Do not
+        // cache across dialect changes, or publish malformed state as OFF.
+        val key = s.isMate to s.ancMode
+        if (force || lastAnc != key) {
+            val status = ancPublishStatus(s.ancMode, s.isMate) ?: return
+            lastAnc = key
             send(ctx, OppoPodsAction.ACTION_PODS_ANC_CHANGED) {
                 putExtra("address", s.address.orEmpty())
-                putExtra("status", ancStatusForUi(s.ancMode))
+                putExtra("status", status)
             }
         }
     }
@@ -402,7 +396,7 @@ object OppoCompatBridge {
 
     /** UI 手动刷新时把缓存清空，保证全量重发。 */
     fun resetCache() {
-        lastAnc = Int.MIN_VALUE
+        lastAnc = null
         lastBattery = ""
         lastWear = ""
         lastGameMode = null

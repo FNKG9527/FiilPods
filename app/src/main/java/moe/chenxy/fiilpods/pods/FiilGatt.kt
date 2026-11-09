@@ -94,7 +94,15 @@ object FiilGatt {
 
     /** 收到一帧时回调（在 binder 线程，调用方需自行切线程）。 */
     @Volatile
-    var onFrame: ((FiilMate.Frame) -> Unit)? = null
+    var onMateFrame: ((FiilMate.Frame) -> Unit)? = null
+
+    /** GAIA 机型同样走这个 GATT 实例，不能当成 Mate 帧丢弃。 */
+    @Volatile
+    var onGaiaFrame: ((FiilGaia.Frame) -> Unit)? = null
+
+    /** 未知型号在收到完整合法帧后回报协议族，供控制器纠正发送方言。 */
+    @Volatile
+    var onDialectDetected: ((FrameDialect) -> Unit)? = null
 
     /** 连接状态变化（true=已连上可用，false=断开）。 */
     @Volatile
@@ -104,9 +112,23 @@ object FiilGatt {
     @Volatile
     var onBytes: (() -> Unit)? = null
 
-    // 收包缓冲：GATT 通知可能把一帧拆成多包，也可能一包多帧。
-    private val rxBuf = ByteArray(1024)
-    private var rxLen = 0
+    /**
+     * 收包重组与协议识别必须由同一个锁保护。
+     *
+     * GATT binder 回调可能与用户切换伪装型号/连接重置并发发生；把协议族和半帧
+     * 收敛到 [GattFrameParser]，避免旧代码那种 `setDialect()` 清 rxLen 与
+     * `handleRx()` 同时 append 的竞态。
+     */
+    private val frameParser = GattFrameParser(null)
+
+    /** 在发起连接前指定协议；未知型号仅在收到完整合法 GAIA 帧后才锁定。 */
+    fun setDialect(value: FrameDialect?) {
+        frameParser.reset(value)
+    }
+
+    private fun clearRx() {
+        frameParser.clear()
+    }
 
     // ------------------------------------------------------------------
     // 连接
@@ -134,7 +156,7 @@ object FiilGatt {
 
         connecting = true
         stopping = false
-        rxLen = 0
+        clearRx()
         Log.i(TAG, "gatt connecting to ${FiilConfig.maskAddress(device.address)}")
 
         val g = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -164,7 +186,7 @@ object FiilGatt {
         gatt = null
         writeChar = null
         writeQueue.clear()
-        rxLen = 0
+        clearRx()
         if (was) {
             Log.i(TAG, "gatt disconnected")
             runCatching { onStateChanged?.invoke(false) }
@@ -280,26 +302,27 @@ object FiilGatt {
         }
     }
 
-    /** 把一包通知数据塞进重组缓冲并按 [FiilMate] 切帧。 */
-    @Synchronized
+    /**
+     * 把一包通知数据塞进重组器并按协议族切帧。
+     *
+     * [GattFrameParser.accept] 自己串行化半帧、方言切换和缓冲复位；回调在它的锁外
+     * 执行，避免控制器中可能再次发包/切换连接时把 GATT RX 锁长时间占住。
+     */
     private fun handleRx(chunk: ByteArray) {
         if (chunk.isEmpty()) return
         runCatching { onBytes?.invoke() }
-        if (rxLen + chunk.size > rxBuf.size) {
-            Log.w(TAG, "rx overflow, reset (rxLen=$rxLen chunk=${chunk.size})")
-            rxLen = 0
+        val batch = frameParser.accept(chunk)
+        batch.newlyDetectedDialect?.let { detected ->
+            runCatching { onDialectDetected?.invoke(detected) }
+                .onFailure { Log.w(TAG, "dialect callback failed: ${it.message}") }
         }
-        System.arraycopy(chunk, 0, rxBuf, rxLen, chunk.size)
-        rxLen += chunk.size
-
-        val (frames, remain) = FiilMate.drain(rxBuf, rxLen)
-        // drain 已把剩余字节搬到缓冲区头部
-        rxLen = remain
-        if (rxLen < 0 || rxLen > rxBuf.size) rxLen = 0
-
-        for (f in frames) {
-            runCatching { onFrame?.invoke(f) }
-                .onFailure { Log.w(TAG, "frame callback failed: ${it.message}") }
+        for (frame in batch.mate) {
+            runCatching { onMateFrame?.invoke(frame) }
+                .onFailure { Log.w(TAG, "mate callback failed: ${it.message}") }
+        }
+        for (frame in batch.gaia) {
+            runCatching { onGaiaFrame?.invoke(frame) }
+                .onFailure { Log.w(TAG, "gaia callback failed: ${it.message}") }
         }
     }
 

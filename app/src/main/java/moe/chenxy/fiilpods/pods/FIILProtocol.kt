@@ -234,18 +234,18 @@ object FIILProtocol {
      * 其余机型打日志并退回 GAIA 的 SET_ANC（对无 ANC 机型等于空操作，无害）。
      */
     fun setMAFMode(mode: Int) {
-        val v = mode.coerceIn(0, 4).toByte()
-        if (FiilRfcommController.isMateDialect && FiilModels.supportsMateMaf(FiilRfcommController.earType)) {
-            FiilRfcommController.sendMate(FiilMate.Cid.SET_MAF, 0, byteArrayOf(v))
-        } else {
-            if (FiilRfcommController.isMateDialect) {
-                Log.w(
-                    TAG,
-                    "setMAFMode: earType=${FiilRfcommController.earType} 无 cid44，退回 GAIA SET_ANC",
-                )
-            }
-            FiilRfcommController.setAnc(mode)
+        // This convenience API owns the canonical MAF range.  The controller's setAnc API stays
+        // deliberately raw for dialect-labelled SettingsControlCard values, but every MAF change
+        // must pass through that controller path so stale replies, timeout recovery, and readback
+        // tracking are identical for Mate and GAIA devices.
+        val target = mode.coerceIn(0, 4)
+        if (FiilRfcommController.isMateDialect && !FiilModels.supportsMateMaf(FiilRfcommController.earType)) {
+            Log.w(
+                TAG,
+                "setMAFMode: earType=${FiilRfcommController.earType} 无 cid44，退回 GAIA SET_ANC",
+            )
         }
+        FiilRfcommController.setAnc(target)
     }
 
     /**
@@ -430,10 +430,10 @@ object FIILProtocol {
             )
             return
         }
-        val payload = ByteArray(bands.size + 2)
-        payload[0] = 0                       // 保留位：APP 沿用读取回包的 [0]
-        payload[1] = type.coerceIn(0, 255).toByte()
-        bands.copyInto(payload, destinationOffset = 2)
+        // 官方保存整块读回包，reserved（常见 0x0A）必须原样回填；写 0 会被拒绝。
+        val payload = EqWritePayload.build(
+            bands, type.coerceIn(0, 255), FiilRfcommController.eqReserved, bands.size,
+        )
         // EQ 写入的确认不体现在 eqIndex 上（自定义档恒为 -1），所以严格等回显。
         FiilRfcommController.expectAckPublicStrict("eq", "EQ 写入")
         if (FiilRfcommController.isMateDialect) {
@@ -609,7 +609,9 @@ object FIILProtocol {
             requestCinemaMode()
             requestMultipoint()
             requestWearState()
+            requestToneVolume()
             readEQ()
+            requestAdaptiveSwitches()
             // LDAC 耳机侧状态（cid=39 的 143/142）——按机型门控。
             requestLdacState()
         } else {

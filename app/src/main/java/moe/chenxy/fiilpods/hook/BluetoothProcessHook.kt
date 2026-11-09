@@ -1,5 +1,8 @@
 package moe.chenxy.fiilpods.hook
 
+import android.app.AppOpsManager
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHeadset
 import android.content.BroadcastReceiver
@@ -7,16 +10,27 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.os.Handler
+import android.os.HandlerThread
 import android.util.Log
+import moe.chenxy.fiilpods.config.ConfigManager
+import moe.chenxy.fiilpods.pods.AncSemantic
+import moe.chenxy.fiilpods.pods.AncWireCodec
+import moe.chenxy.fiilpods.pods.AutoGameModePolicy
+import moe.chenxy.fiilpods.pods.AutoGameModeRuntime
 import moe.chenxy.fiilpods.pods.FIILProtocol
 import moe.chenxy.fiilpods.pods.FiilAction
 import moe.chenxy.fiilpods.pods.FiilCodec
 import moe.chenxy.fiilpods.pods.FiilConfig
+import moe.chenxy.fiilpods.pods.FiilCommands
+import moe.chenxy.fiilpods.pods.FiilGaia
 import moe.chenxy.fiilpods.pods.FiilMate
 import moe.chenxy.fiilpods.pods.FiilModels
 import moe.chenxy.fiilpods.pods.FiilRfcommController
 import moe.chenxy.fiilpods.pods.RfcommLog
+import moe.chenxy.fiilpods.pods.ancCycleWire
+import moe.chenxy.fiilpods.pods.ancDialectForEarType
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.OppoPodsAction
 
 /**
@@ -36,7 +50,59 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
     private var receiverRegistered = false
     private var hostContext: Context? = null
 
+    /**
+     * The automatic game-mode work is deliberately owned by one background Handler.
+     * Broadcast delivery and RFCOMM reader callbacks only enqueue here; neither can block on
+     * UsageStats nor issue a synchronous socket operation.
+     */
+    private val autoGameThread = HandlerThread("FiilPods-AutoGame").apply { start() }
+    private val autoGameHandler = Handler(autoGameThread.looper)
+    private val autoGameLock = Any()
+    private val autoGameRuntime = AutoGameModeRuntime()
+
+    @Volatile
+    private var autoGameConfigEnabled = false
+
+    @Volatile
+    private var autoGameConnectionActive = false
+
+    private var autoGameEnabled = false
+    private var autoGameGeneration = 0L
+    private var autoGameLastUsageEventAt = 0L
+    private val autoGameUsageEventsAtCursor = mutableSetOf<String>()
+    private var autoGameUsagePoll: Runnable? = null
+    private var autoGameLatencyProbe: Runnable? = null
+
+    /** 用户在本连接内手动切过低延迟：本连接不再自动下发任何命令。 */
+    private var autoGameManualSession = false
+
+    /** 已下发但尚未被耳机状态帧确认的目标档位；null 表示没有在途命令。 */
+    private var autoGameAwaitingMode: AutoGameModePolicy.LowLatency? = null
+
+    /** 当前这轮状态探测已尝试次数，用来给「耳机不回包」兜底，避免无限轮询。 */
+    private var autoGameLatencyProbeAttempts = 0
+
+    /** 前台分类轮询间隔：太密会白耗电，太疏会让「退出游戏」迟滞数秒。 */
+    private companion object {
+        private const val AUTO_GAME_POLL_INTERVAL_MS = 3_000L
+        private const val AUTO_GAME_LATENCY_PROBE_INTERVAL_MS = 1_200L
+        private const val AUTO_GAME_LATENCY_PROBE_MAX = 12
+        private const val AUTO_GAME_USAGE_LOOKBACK_MS = 10 * 60_000L
+    }
+
+    private data class AutoGameUsageEvent(
+        val at: Long,
+        val packageName: String,
+        val className: String?,
+    )
+
     override fun onHook() {
+        if (packageName != HookEntry.PKG_BLUETOOTH) {
+            logW("auto-game integration skipped outside ${HookEntry.PKG_BLUETOOTH}: $packageName")
+            return
+        }
+        // Install RX/disconnect observers before any connection can start emitting status.
+        installAutoGameModeHooks()
         val ctx = entry.appContextOrNull()
         if (ctx == null) {
             logW("no application context yet, controller deferred")
@@ -44,6 +110,7 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
             hostContext = ctx
             FiilRfcommController.start(ctx)
             registerReceiver(ctx)
+            refreshAutoGameModeConfig()
             adoptAlreadyConnected(ctx)
         }
         installAdapterServiceHook()
@@ -186,12 +253,423 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                 hostContext = ctx
                 FiilRfcommController.start(ctx)
                 registerReceiver(ctx)
+                refreshAutoGameModeConfig()
                 announceAlive(ctx)
                 // 蓝牙进程刚起来：把此刻已经连着的耳机接管过来
                 adoptAlreadyConnected(ctx)
             }
         }.onFailure { logW("AdapterService.onCreate hook skipped", it) }
     }
+
+    /** Installs narrow controller observers for real low-latency status frames and disconnects. */
+    private fun installAutoGameModeHooks() {
+        installAutoGameHook("controller disconnect") {
+            val method = FiilRfcommController::class.java
+                .getDeclaredMethod("disconnect", String::class.java)
+                .apply { isAccessible = true }
+            hookBefore(method) { onAutoGameDisconnected() }
+        }
+        // 连接建立的两种通道都要开新会话：SPP 走 connectBlocking 返回 true，
+        // BLE-GATT 走 onGattReady。没有这一步，`autoGameConnectionActive` 永远为 false，
+        // 自动游戏模式在「先启用开关、后连耳机」的常见顺序下完全不动。
+        installAutoGameHook("SPP connected") {
+            val method = FiilRfcommController::class.java
+                .getDeclaredMethod("connectBlocking", BluetoothDevice::class.java)
+                .apply { isAccessible = true }
+            hookAfter(method) { param ->
+                if (param.result == true) onAutoGameConnected()
+            }
+        }
+        installAutoGameHook("GATT connected") {
+            val method = FiilRfcommController::class.java
+                .getDeclaredMethod("onGattReady", BluetoothDevice::class.java)
+                .apply { isAccessible = true }
+            hookAfter(method) { onAutoGameConnected() }
+        }
+        // GATT loss bypasses disconnect(String), so observe it separately to prevent a stale
+        // baseline or AUTO ownership from crossing a BLE reconnection boundary.
+        installAutoGameHook("GATT disconnect") {
+            val method = FiilRfcommController::class.java
+                .getDeclaredMethod("onGattLost")
+                .apply { isAccessible = true }
+            hookAfter(method) { onAutoGameDisconnected() }
+        }
+        installAutoGameHook("Mate low-latency status") {
+            val method = FiilRfcommController::class.java
+                .getDeclaredMethod("dispatchMate", FiilMate.Frame::class.java)
+                .apply { isAccessible = true }
+            hookAfter(method) { param ->
+                val frame = param.args.firstOrNull() as? FiilMate.Frame ?: return@hookAfter
+                confirmedAutoGameMode(frame)?.let(::onAutoGameLowLatencyConfirmed)
+            }
+        }
+        installAutoGameHook("GAIA low-latency status") {
+            val method = FiilRfcommController::class.java
+                .getDeclaredMethod("dispatch", FiilGaia.Frame::class.java)
+                .apply { isAccessible = true }
+            hookAfter(method) { param ->
+                val frame = param.args.firstOrNull() as? FiilGaia.Frame ?: return@hookAfter
+                confirmedAutoGameMode(frame)?.let(::onAutoGameLowLatencyConfirmed)
+            }
+        }
+    }
+
+    private fun installAutoGameHook(label: String, install: () -> Unit) {
+        runCatching(install).onFailure { logW("auto-game $label hook skipped", it) }
+    }
+
+    /**
+     * Reads the remote preference every time. The action's extras are intentionally ignored:
+     * only [ConfigManager.autoGameMode] after [refreshConfigFromPrefs] is authoritative.
+     */
+    private fun refreshAutoGameModeConfig() {
+        refreshConfigFromPrefs()
+        val enabled = ConfigManager.autoGameMode()
+        synchronized(autoGameLock) {
+            val wasEnabled = autoGameConfigEnabled
+            autoGameConfigEnabled = enabled
+            if (!enabled) {
+                autoGameGeneration++
+                cancelAutoGameTasksLocked()
+                autoGameEnabled = false
+                autoGameConnectionActive = false
+                autoGameManualSession = false
+                autoGameAwaitingMode = null
+                // setEnabled(false) is intentionally idempotent and clears a stale baseline even
+                // when this process already believed the feature was disabled.
+                autoGameRuntime.setEnabled(false)
+                autoGameLastUsageEventAt = 0L
+                autoGameUsageEventsAtCursor.clear()
+                logI("auto-game disabled")
+                return
+            }
+
+            // An unchanged enabled preference must not revoke AUTO ownership or cancel an
+            // in-flight confirmation merely because another setting changed.
+            if (wasEnabled) return
+
+            // A new enable is a session boundary: do not reuse a prior connection's manual
+            // ownership, foreground cursor, or low-latency confirmation.
+            autoGameRuntime.setEnabled(false)
+            autoGameManualSession = false
+            autoGameAwaitingMode = null
+            autoGameLastUsageEventAt = 0L
+            autoGameUsageEventsAtCursor.clear()
+            autoGameRuntime.setEnabled(true)
+            autoGameEnabled = true
+            autoGameConnectionActive = FiilRfcommController.isConnected
+            val generation = ++autoGameGeneration
+            cancelAutoGameTasksLocked()
+            if (autoGameConnectionActive) startAutoGameWorkLocked(generation)
+            logI("auto-game enabled connected=$autoGameConnectionActive")
+        }
+    }
+
+    /** Marks all manual low-latency ingress before writing its corresponding RFCOMM command. */
+    private fun issueManualLowLatency(mode: FIILProtocol.LowLatencyMode) {
+        synchronized(autoGameLock) {
+            autoGameGeneration++
+            cancelAutoGameTasksLocked()
+            autoGameManualSession = true
+            autoGameAwaitingMode = null
+            autoGameRuntime.markManualAction()
+            // Keep the ownership transition and the protocol write in one critical section so a
+            // queued auto task cannot slip a write between them.
+            FIILProtocol.setLowLatencyMode(mode)
+        }
+    }
+
+    private fun onAutoGameDisconnected() {
+        synchronized(autoGameLock) {
+            autoGameGeneration++
+            cancelAutoGameTasksLocked()
+            autoGameRuntime.onDisconnected()
+            autoGameEnabled = false
+            autoGameConnectionActive = false
+            autoGameManualSession = false
+            autoGameAwaitingMode = null
+            autoGameLastUsageEventAt = 0L
+            autoGameUsageEventsAtCursor.clear()
+        }
+    }
+
+    /**
+     * 新连接建立时启动自动任务。
+     *
+     * 只在「自动游戏模式」已启用时动作；真正下发命令仍要等耳机回报档位，
+     * 所以这里启动的是「先读」的探测链，不是写入。
+     */
+    private fun onAutoGameConnected() {
+        synchronized(autoGameLock) {
+            if (!autoGameConfigEnabled) return
+            autoGameGeneration++
+            cancelAutoGameTasksLocked()
+            autoGameRuntime.onDisconnected()
+            autoGameManualSession = false
+            autoGameAwaitingMode = null
+            autoGameLastUsageEventAt = 0L
+            autoGameUsageEventsAtCursor.clear()
+            autoGameEnabled = true
+            autoGameConnectionActive = true
+            autoGameRuntime.setEnabled(true)
+            startAutoGameWorkLocked(autoGameGeneration)
+        }
+    }
+
+    private fun confirmedAutoGameMode(frame: FiilMate.Frame): AutoGameModePolicy.LowLatency? {
+        val wire = when {
+            frame.classifyId == FiilMate.Cid.QUERY &&
+                frame.commandId == FiilMate.Query.LOW_LATENCY && frame.payload.isNotEmpty() ->
+                frame.byteAt(0, -1)
+            frame.classifyId == FiilMate.Cid.NOTIFY &&
+                frame.commandId == FiilMate.Notify.LOW_LATENCY && frame.payload.isNotEmpty() ->
+                frame.byteAt(0, -1)
+            else -> return null
+        }
+        return lowLatencyFromWire(wire)
+    }
+
+    private fun confirmedAutoGameMode(frame: FiilGaia.Frame): AutoGameModePolicy.LowLatency? {
+        if (frame.command != FiilCommands.GET_LOW_LATENCY || !frame.isAck || frame.payload.size <= 1) {
+            return null
+        }
+        return lowLatencyFromWire(FiilGaia.byteAt(frame, 1, -1))
+    }
+
+    private fun lowLatencyFromWire(wire: Int): AutoGameModePolicy.LowLatency? = when (wire) {
+        0 -> AutoGameModePolicy.LowLatency.MUSIC
+        1 -> AutoGameModePolicy.LowLatency.GAME
+        2 -> AutoGameModePolicy.LowLatency.VIDEO
+        else -> null
+    }
+
+    /** Reader callbacks enqueue this work; they never touch UsageStats or issue socket writes. */
+    private fun onAutoGameLowLatencyConfirmed(mode: AutoGameModePolicy.LowLatency) {
+        autoGameHandler.post {
+            synchronized(autoGameLock) {
+                if (!autoGameConfigEnabled || !FiilRfcommController.isConnected) return@synchronized
+                autoGameConnectionActive = true
+                if (!autoGameEnabled) {
+                    autoGameRuntime.setEnabled(true)
+                    autoGameEnabled = true
+                }
+                if (autoGameManualSession) return@synchronized
+
+                val generation = autoGameGeneration
+                if (autoGameAwaitingMode == mode) autoGameAwaitingMode = null
+                issueAutoGameCommandLocked(
+                    autoGameRuntime.onConfirmedLowLatency(mode),
+                    generation,
+                )
+                if (autoGameUsagePoll == null) scheduleAutoGameUsagePollLocked(generation, 0L)
+                if (!autoGameRuntime.hasConfirmedBaseline() || autoGameAwaitingMode != null) {
+                    scheduleAutoGameLatencyProbeLocked(generation, 0)
+                } else {
+                    autoGameLatencyProbe?.let(autoGameHandler::removeCallbacks)
+                    autoGameLatencyProbe = null
+                    autoGameLatencyProbeAttempts = 0
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 自动游戏模式的运行时（全部在 autoGameLock 内调用）
+    // ------------------------------------------------------------------
+
+    /**
+     * 取消所有待执行的自动任务。
+     *
+     * 必须在 [autoGameLock] 内调用：调用方已经持有锁，因此这里不改任何
+     * 「是否启用」类状态，只撤回调并清计数，避免与调度中的 runnable 交叉。
+     */
+    private fun cancelAutoGameTasksLocked() {
+        autoGameUsagePoll?.let(autoGameHandler::removeCallbacks)
+        autoGameUsagePoll = null
+        autoGameLatencyProbe?.let(autoGameHandler::removeCallbacks)
+        autoGameLatencyProbe = null
+        autoGameLatencyProbeAttempts = 0
+    }
+
+    /**
+     * 启动一个连接会话的自动任务：先探一次耳机当前档位。
+     *
+     * 不直接开始轮询前台应用 —— 因为自动化必须等到「耳机真实回报过一次档位」
+     * 才能判断基线（[AutoGameModeRuntime.hasConfirmedBaseline]）。在拿到基线前的
+     * 写入可能把用户自己选的游戏模式误改回音乐，所以第一步永远是读。
+     */
+    private fun startAutoGameWorkLocked(generation: Long) {
+        if (generation != autoGameGeneration) return
+        scheduleAutoGameLatencyProbeLocked(generation, 0L)
+    }
+
+    /**
+     * 下发一条自动低延迟命令。
+     *
+     * [mode] 为 null 表示策略判定「不该动」，此时什么都不发。
+     * 该函数只能在 [autoGameLock] 内调用，且必须是 [autoGameHandler] 线程
+     * （真正发字节会阻塞，蓝牙进程的主线程不能被占）。
+     */
+    private fun issueAutoGameCommandLocked(
+        mode: AutoGameModePolicy.LowLatency?,
+        generation: Long,
+    ) {
+        if (mode == null) return
+        if (generation != autoGameGeneration) return
+        if (autoGameManualSession) return
+        // 已经是目标档位就不要重复下命令 —— 反复重发会把耳机切档的提示音刷屏。
+        if (FiilRfcommController.lowLatencyLevel == mode.wireValueOf()) return
+        autoGameAwaitingMode = mode
+        RfcommLog.i(
+            hostContext,
+            TAG,
+            "auto-game set low-latency ${mode.name} (wire=${mode.wireValueOf()})",
+        )
+        FIILProtocol.setLowLatencyMode(
+            when (mode) {
+                AutoGameModePolicy.LowLatency.MUSIC -> FIILProtocol.LowLatencyMode.MUSIC
+                AutoGameModePolicy.LowLatency.GAME -> FIILProtocol.LowLatencyMode.GAME
+                AutoGameModePolicy.LowLatency.VIDEO -> FIILProtocol.LowLatencyMode.VIDEO
+            },
+        )
+    }
+
+    /** 策略层的三态与线缆值一一对应；Mate 只有二态，VIDEO 在协议层会降级成 GAME。 */
+    private fun AutoGameModePolicy.LowLatency.wireValueOf(): Int = when (this) {
+        AutoGameModePolicy.LowLatency.MUSIC -> 0
+        AutoGameModePolicy.LowLatency.GAME -> 1
+        AutoGameModePolicy.LowLatency.VIDEO -> 2
+    }
+
+    /**
+     * 安排下一次「前台应用分类」轮询。
+     *
+     * 轮询跑在 [autoGameHandler]，每次先校验 generation，连接重建后旧任务自动作废。
+     */
+    private fun scheduleAutoGameUsagePollLocked(generation: Long, delayMs: Long) {
+        autoGameUsagePoll?.let(autoGameHandler::removeCallbacks)
+        val runnable = object : Runnable {
+            override fun run() {
+                autoGameHandler.post {
+                    val classification = classifyForegroundApp()
+                    synchronized(autoGameLock) {
+                        if (generation != autoGameGeneration) return@synchronized
+                        if (!autoGameConfigEnabled || !autoGameConnectionActive) return@synchronized
+                        if (autoGameManualSession) return@synchronized
+                        val command = autoGameRuntime.onForegroundClassification(classification)
+                        issueAutoGameCommandLocked(command, generation)
+                        if (classification != AutoGameModePolicy.Classification.UNKNOWN) {
+                            autoGameUsagePoll = this
+                            autoGameHandler.postDelayed(this, AUTO_GAME_POLL_INTERVAL_MS)
+                        } else {
+                            // 拿不到前台应用时不要停摆：下一次重新试，但拉长间隔，
+                            // 免得在 UsageStats 不可用的机型上每 3 秒白跑一次。
+                            autoGameUsagePoll = this
+                            autoGameHandler.postDelayed(this, AUTO_GAME_POLL_INTERVAL_MS * 5)
+                        }
+                    }
+                }
+            }
+        }
+        autoGameUsagePoll = runnable
+        autoGameHandler.postDelayed(runnable, delayMs)
+    }
+
+    /**
+     * 安排一次「耳机低延迟档位」回读。
+     *
+     * 只有耳机真的回报过档位，[AutoGameModeRuntime] 才会建立基线并允许自动写入；
+     * 因此这里带次数上限，避免耳机一直不回包时无限轮询。
+     */
+    private fun scheduleAutoGameLatencyProbeLocked(generation: Long, delayMs: Long) {
+        autoGameLatencyProbe?.let(autoGameHandler::removeCallbacks)
+        val runnable = object : Runnable {
+            override fun run() {
+                autoGameHandler.post {
+                    synchronized(autoGameLock) {
+                        if (generation != autoGameGeneration) return@synchronized
+                        if (!autoGameConfigEnabled || !FiilRfcommController.isConnected) {
+                            return@synchronized
+                        }
+                        if (autoGameLatencyProbeAttempts >= AUTO_GAME_LATENCY_PROBE_MAX) {
+                            RfcommLog.w(
+                                hostContext,
+                                TAG,
+                                "auto-game gave up probing low-latency after " +
+                                    "$autoGameLatencyProbeAttempts attempts",
+                            )
+                            autoGameLatencyProbe = null
+                            return@synchronized
+                        }
+                        autoGameLatencyProbeAttempts++
+                        FIILProtocol.requestLowLatency()
+                        autoGameLatencyProbe = this
+                        autoGameHandler.postDelayed(this, AUTO_GAME_LATENCY_PROBE_INTERVAL_MS)
+                    }
+                }
+            }
+        }
+        autoGameLatencyProbe = runnable
+        autoGameHandler.postDelayed(runnable, delayMs)
+    }
+
+    /**
+     * 判定当前前台应用是否属于游戏。
+     *
+     * 只读 UsageStats，**任何不确定都返回 UNKNOWN**（fail closed）：拿不到 UsageStatsManager、
+     * 没有授权、事件为空、包名解析失败、category 未声明 —— 一律 UNKNOWN，
+     * 策略层对 UNKNOWN 不做任何动作，因此不会误切档位。
+     */
+    private fun classifyForegroundApp(): AutoGameModePolicy.Classification {
+        val ctx = hostContext ?: return AutoGameModePolicy.Classification.UNKNOWN
+        return runCatching {
+            val manager = ctx.getSystemService(UsageStatsManager::class.java)
+                ?: return AutoGameModePolicy.Classification.UNKNOWN
+            val now = System.currentTimeMillis()
+            val since = now - AUTO_GAME_USAGE_LOOKBACK_MS
+            val events = manager.queryEvents(since, now) ?: return AutoGameModePolicy.Classification.UNKNOWN
+            var lastForegroundPackage: String? = null
+            var lastForegroundAt = 0L
+            val event = UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType != UsageEvents.Event.MOVE_TO_FOREGROUND &&
+                    event.eventType != UsageEvents.Event.ACTIVITY_RESUMED
+                ) {
+                    continue
+                }
+                // 只关心「当前」前台：取窗口内时间戳最新的那条前台事件即可。
+                if (event.timeStamp < lastForegroundAt) continue
+                lastForegroundAt = event.timeStamp
+                lastForegroundPackage = event.packageName
+            }
+            if (lastForegroundPackage == null) return AutoGameModePolicy.Classification.UNKNOWN
+            if (lastForegroundAt > autoGameLastUsageEventAt) {
+                autoGameLastUsageEventAt = lastForegroundAt
+            }
+            categoryOf(ctx, lastForegroundPackage)
+        }.getOrElse {
+            logW("foreground classification failed", it)
+            AutoGameModePolicy.Classification.UNKNOWN
+        }
+    }
+
+    /** 读 [ApplicationInfo] 判定类别；解析不到包信息时按 UNKNOWN 处理。 */
+    private fun categoryOf(ctx: Context, packageName: String): AutoGameModePolicy.Classification =
+        runCatching {
+            val info = ctx.packageManager.getApplicationInfo(packageName, 0)
+            val isGame = info.category == ApplicationInfo.CATEGORY_GAME ||
+                (info.flags and ApplicationInfo.FLAG_IS_GAME) != 0
+            if (isGame) {
+                AutoGameModePolicy.Classification.GAME
+            } else {
+                AutoGameModePolicy.Classification.NON_GAME
+            }
+        }.getOrElse {
+            // Android 11+ 的包可见性限制会让蓝牙进程查不到第三方应用的 ApplicationInfo。
+            // 这种情况下不能猜「不是游戏」，只能如实返回 UNKNOWN。
+            AutoGameModePolicy.Classification.UNKNOWN
+        }
 
     private fun installA2dpStateHook() {
         val method = findMethodByParamCount(
@@ -405,7 +883,9 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                             // OnSharedPreferenceChangeListener 不够：LSPosed 的远端
                             // SharedPreferences 在部分版本上只有「同一进程内写」才回调，
                             // App 跨进程改时监听器不触发，表现为「设置改了要重启手机才生效」。
-                            refreshConfigFromPrefs()
+                            // refreshAutoGameModeConfig 内部会先 refreshConfigFromPrefs()，
+                            // 再按最新的「自动游戏模式」开关建立/拆除会话。
+                            refreshAutoGameModeConfig()
                             logI("config changed")
                         }
                         // ---- OppoPods 兼容契约（UI 层是原封移植的） ----
@@ -414,14 +894,18 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                             FiilRfcommController.setAnc(intent.getIntExtra("status", 0))
                         }
                         OppoPodsAction.ACTION_CYCLE_ANC -> {
-                            FiilRfcommController.setAnc(
-                                (FiilRfcommController.ancMode + 1).let { if (it > 2) 0 else it }
-                            )
+                            // 循环的是**语义**三态（关 → 降噪 → 通透 → 关），不是线值 +1。
+                            // 旧实现 `(ancMode + 1) % 3` 在 GAIA 机型上会从「监听」跳到
+                            // 「关闭」（GAIA raw 2=监听、3=开启），语义完全错位。
+                            val dialect = ancDialectForEarType(FiilRfcommController.earType)
+                            FiilRfcommController.setAnc(ancCycleWire(dialect, FiilRfcommController.ancMode))
                         }
                         OppoPodsAction.ACTION_GAME_MODE_SET -> {
                             // 游戏模式 ↔ 低延迟：开 → GAME(1)，关 → MUSIC(0)
                             val on = intent.getBooleanExtra("enabled", false)
-                            FIILProtocol.setLowLatencyMode(
+                            // 用户点开关是明确的手动意图：先占住归属，再发命令，
+                            // 否则自动游戏模式可能在下一秒把档位改回去。
+                            issueManualLowLatency(
                                 if (on) FIILProtocol.LowLatencyMode.GAME
                                 else FIILProtocol.LowLatencyMode.MUSIC
                             )
@@ -459,7 +943,7 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                         }
                         OppoPodsAction.ACTION_LOW_LATENCY_MODE_SET -> {
                             // 线值直通：0=音乐 1=游戏 2=视频（cid=37, cmdId=0）
-                            FIILProtocol.setLowLatencyMode(
+                            issueManualLowLatency(
                                 FIILProtocol.LowLatencyMode.fromWire(
                                     intent.getIntExtra(OppoPodsAction.EXTRA_LOW_LATENCY_MODE, 0),
                                 ),
@@ -631,7 +1115,7 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
             "wear" ->
                 FIILProtocol.setWearDetect(intent.getBooleanExtra(FiilAction.EXTRA_FLAG, false))
             "adaptive" -> {
-                val kindName = intent.getStringExtra("adaptive_kind")
+                val kindName = intent.getStringExtra(FiilAction.EXTRA_ADAPTIVE_KIND)
                 val kind = runCatching {
                     FiilRfcommController.AdaptiveKind.valueOf(kindName.orEmpty())
                 }.getOrNull()
@@ -647,14 +1131,14 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
             "lowLatency" -> {
                 // 兼容旧调用：布尔值按「开=游戏档」
                 val on = intent.getBooleanExtra(FiilAction.EXTRA_FLAG, false)
-                FIILProtocol.setLowLatencyMode(
+                issueManualLowLatency(
                     if (on) FIILProtocol.LowLatencyMode.GAME else FIILProtocol.LowLatencyMode.MUSIC
                 )
             }
             "lowLatencyMode" -> {
                 // 传的是协议线值（0=音乐 / 1=游戏 / 2=视频），不是枚举序号
                 val wire = intent.getIntExtra(FiilAction.EXTRA_VALUE, 0)
-                FIILProtocol.setLowLatencyMode(FIILProtocol.LowLatencyMode.fromWire(wire))
+                issueManualLowLatency(FIILProtocol.LowLatencyMode.fromWire(wire))
             }
             "setEarType" -> {
                 // 手动选择型号（0 = 恢复自动识别）。落盘 + 立即生效。

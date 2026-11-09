@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">FiilPods 3.2</string>
+    <string name="app_name">FiilPods 3.3</string>
     <string name="app_subtitle">FIIL 耳机适配 HyperOS</string>
     <string name="pod_info">耳机信息</string>
     <string name="about">关于 FiilPods</string>
@@ -79,6 +79,7 @@
     <string name="cancel">取消</string>
     <string name="connecting">连接中...</string>
     <string name="connect_failed">连接失败，请确认设备已开机且在附近。</string>
+    <string name="operation_failed">操作未生效：%1$s，请重试</string>
     <string name="retry">重试</string>
     <string name="bt_permission_required">需要蓝牙权限才能发现耳机。</string>
     <string name="grant_permission">授予权限</string>
@@ -127,6 +128,12 @@
     <string name="export_log_done">已导出 %1$d 行日志（%2$s）</string>
     <string name="export_log_failed">导出失败：%1$s</string>
     <string name="export_log_share_title">分享日志文件</string>
+    <string name="export_log_share_failed">日志已导出，但无法打开分享面板：%1$s</string>
+    <string name="crash_page_title">%1$s · 上次启动崩溃</string>
+    <string name="crash_copy_stack">复制堆栈</string>
+    <string name="crash_clip_label">FiilPods 崩溃</string>
+    <string name="crash_copied">已复制</string>
+    <string name="crash_clear_retry">清除并重试</string>
     <string name="hide_desktop_icon">隐藏桌面图标</string>
     <string name="hide_desktop_icon_summary">隐藏启动器图标；隐藏后请从模块管理器打开</string>
     <string name="cycle_anc">切换降噪</string>

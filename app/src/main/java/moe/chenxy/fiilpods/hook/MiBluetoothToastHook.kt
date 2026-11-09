@@ -28,6 +28,9 @@ import moe.chenxy.fiilpods.pods.FiilAction
 import moe.chenxy.fiilpods.pods.FiilConfig
 import moe.chenxy.fiilpods.pods.FiilModels
 import moe.chenxy.fiilpods.pods.FiilStatus
+import moe.chenxy.fiilpods.pods.IslandTimingPolicy
+import moe.chenxy.fiilpods.pods.IslandTrigger
+import moe.chenxy.fiilpods.config.ConfigManager
 import moe.chenxy.fiilpods.pods.IconParams
 import moe.chenxy.fiilpods.pods.PodBattery
 import moe.chenxy.fiilpods.pods.StringToastBean
@@ -39,6 +42,61 @@ import moe.chenxy.fiilpods.pods.ToastIconFormat
 import moe.chenxy.fiilpods.pods.ToastSide
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.PodParams
+
+/**
+ * Couples a status-derived battery event to the one battery broadcast that may follow it.
+ *
+ * `ACTION_STATE` has the authoritative wear bits and can also carry a usable battery snapshot.
+ * The later battery broadcast must still refresh the notification, but must not replay the same
+ * module-island edge. A different battery broadcast consumes the pending marker too, so an old
+ * status event cannot suppress a future connection.
+ */
+internal class IslandBatteryEventReducer {
+    private data class BatteryKey(
+        val left: Pair<Int, Boolean>,
+        val right: Pair<Int, Boolean>,
+        val case: Pair<Int, Boolean>,
+    )
+
+    private data class PendingBatteryEvent(
+        val battery: BatteryKey,
+        val wearLeft: Boolean,
+        val wearRight: Boolean,
+    )
+
+    private var pendingBatteryEvent: PendingBatteryEvent? = null
+
+    fun snapshotFromStatus(status: FiilStatus): BatterySnapshot? {
+        if (!status.connected) return null
+        return BatterySnapshot.fromStatus(status).takeIf { it.hasAny() }
+    }
+
+    fun markStatusDerived(snapshot: BatterySnapshot, status: FiilStatus) {
+        pendingBatteryEvent = snapshot.toPending(status)
+    }
+
+    /** Returns true once when the immediately following battery action duplicates this state event. */
+    fun consumeDuplicateBattery(snapshot: BatterySnapshot, status: FiilStatus?): Boolean {
+        val pending = pendingBatteryEvent ?: return false
+        pendingBatteryEvent = null
+        return pending == snapshot.toPending(status)
+    }
+
+    fun reset() {
+        pendingBatteryEvent = null
+    }
+
+    private fun BatterySnapshot.toPending(status: FiilStatus?): PendingBatteryEvent = PendingBatteryEvent(
+        // ACTION_STATE carries no charging bits. Charging therefore cannot distinguish its matching
+        // battery action; compare only the values/connections it actually reports.
+        battery = BatteryKey(left.toKey(), right.toKey(), case.toKey()),
+        wearLeft = status?.wearLeft ?: false,
+        wearRight = status?.wearRight ?: false,
+    )
+
+    private fun PodBattery?.toKey(): Pair<Int, Boolean> =
+        if (this?.connected == true) this.battery to true else -1 to false
+}
 
 /**
  * 注入 com.xiaomi.bluetooth。
@@ -118,6 +176,10 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
     private var appContext: Context? = null
     private var receiverRegistered = false
     private var lastToastAt = 0L
+    private var hasSeenIslandConnection = false
+    private var lastIslandWearLeft: Boolean? = null
+    private var lastIslandWearRight: Boolean? = null
+    private val islandBatteryEvents = IslandBatteryEventReducer()
 
     /**
      * 落盘诊断日志。
@@ -283,50 +345,88 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
         runCatching {
             ctx.registerReceiver(object : BroadcastReceiver() {
                 override fun onReceive(c: Context?, intent: Intent?) {
-                    when (intent?.action) {
-                        FiilAction.ACTION_PODS_BATTERY_CHANGED -> {
-                            // 进入该分支说明 intent?.action 非空，Kotlin 已智能转换成非空。
-                            val snapshot = BatterySnapshot.fromExtras(intent) ?: return
-                            val name = intent.getStringExtra(FiilAction.EXTRA_DEVICE_NAME) ?: "FIIL"
-                            val address = intent.getStringExtra(FiilAction.EXTRA_ADDRESS).orEmpty()
-                            // 型号由蓝牙进程随电量一起带过来；缺省 -1 表示「这一版还没读到型号」。
-                            val earType = intent.getIntExtra(FiilAction.EXTRA_EAR_TYPE, -1)
-                            appendLog(
-                                "battery rx name=$name addr=${address.take(8)}… ear=$earType " +
-                                    "L=${snapshot.left?.battery} R=${snapshot.right?.battery} " +
-                                    "C=${snapshot.case?.battery}",
-                            )
-                            onBatteryChanged(c ?: appContext, snapshot, name, address, earType)
-                        }
-                        FiilAction.ACTION_PODS_CONNECTED -> {
-                            val name = intent.getStringExtra(FiilAction.EXTRA_DEVICE_NAME) ?: "FIIL"
-                            showToast(c ?: appContext, "已连接 $name", Color.parseColor("#4CAF50"))
-                        }
-                        FiilAction.ACTION_PODS_DISCONNECTED -> {
-                            lastStatus = null
-                            cancelNotification(c ?: appContext)
-                            // 目标第五阶段：断开后必须清掉超级岛，否则岛上会留一条
-                            // 已断开的耳机电量，直到 duration 到期才消失。
-                            hideStrongToast(c ?: appContext)
-                        }
-                        FiilAction.ACTION_PODS_ANC_CHANGED -> {
-                            // MAF 变化：只记模式，电量沿用上次（超级岛要两者同时显示）。
-                            val mode = intent.getIntExtra(FiilAction.EXTRA_STATUS, -1)
-                            val prev = lastStatus
-                            if (prev != null) {
-                                lastStatus = prev.copy(ancMode = mode)
-                            } else {
-                                lastStatus = FiilStatus.EMPTY.copy(
-                                    connected = true,
-                                    ancMode = mode,
-                                    earType = -1,
+                    // This is an exported receiver inside com.xiaomi.bluetooth. Extras are external
+                    // input, so no malformed parcelable / JSON / intent accessor may take down the host.
+                    runCatching {
+                        when (intent?.action) {
+                            FiilAction.ACTION_PODS_BATTERY_CHANGED -> {
+                                val snapshot = BatterySnapshot.fromExtras(intent) ?: return@runCatching
+                                val name = intent.getStringExtra(FiilAction.EXTRA_DEVICE_NAME) ?: "FIIL"
+                                val address = intent.getStringExtra(FiilAction.EXTRA_ADDRESS).orEmpty()
+                                // 型号由蓝牙进程随电量一起带过来；缺省 -1 表示「这一版还没读到型号」。
+                                val earType = intent.getIntExtra(FiilAction.EXTRA_EAR_TYPE, -1)
+                                appendLog(
+                                    "battery rx name=$name addr=${address.take(8)}… ear=$earType " +
+                                        "L=${snapshot.left?.battery} R=${snapshot.right?.battery} " +
+                                        "C=${snapshot.case?.battery}",
+                                )
+                                val duplicateStatusEvent =
+                                    islandBatteryEvents.consumeDuplicateBattery(snapshot, lastStatus)
+                                onBatteryChanged(
+                                    c ?: appContext,
+                                    snapshot,
+                                    name,
+                                    address,
+                                    earType,
+                                    skipIsland = duplicateStatusEvent,
+                                )
+                            }
+                            FiilAction.ACTION_PODS_CONNECTED -> {
+                                val name = intent.getStringExtra(FiilAction.EXTRA_DEVICE_NAME) ?: "FIIL"
+                                showToast(c ?: appContext, "已连接 $name", Color.parseColor("#4CAF50"))
+                            }
+                            FiilAction.ACTION_PODS_DISCONNECTED -> {
+                                islandBatteryEvents.reset()
+                                lastStatus = null
+                                hasSeenIslandConnection = false
+                                lastIslandWearLeft = null
+                                lastIslandWearRight = null
+                                cancelNotification(c ?: appContext)
+                                // 目标第五阶段：断开后必须清掉超级岛，否则岛上会留一条
+                                // 已断开的耳机电量，直到 duration 到期才消失。
+                                hideStrongToast(c ?: appContext)
+                            }
+                            FiilAction.ACTION_PODS_ANC_CHANGED -> {
+                                // MAF 变化：只记模式，电量沿用上次（超级岛要两者同时显示）。
+                                val mode = intent.getIntExtra(FiilAction.EXTRA_STATUS, -1)
+                                val prev = lastStatus
+                                if (prev != null) {
+                                    lastStatus = prev.copy(ancMode = mode)
+                                } else {
+                                    lastStatus = FiilStatus.EMPTY.copy(
+                                        connected = true,
+                                        ancMode = mode,
+                                        earType = -1,
+                                    )
+                                }
+                            }
+                            FiilAction.ACTION_STATE -> {
+                                // ACTION_STATE carries the authoritative wear bits *and* a complete
+                                // battery snapshot. Route usable snapshots through the same reducer
+                                // immediately so a wear edge does not wait for a changed battery value.
+                                val json = intent.getStringExtra(FiilAction.EXTRA_JSON) ?: return@runCatching
+                                val status = FiilStatus.fromJson(json)
+                                lastStatus = status
+                                islandBatteryEvents.reset()
+                                val snapshot = islandBatteryEvents.snapshotFromStatus(status)
+                                    ?: return@runCatching
+                                islandBatteryEvents.markStatusDerived(snapshot, status)
+                                onBatteryChanged(
+                                    c ?: appContext,
+                                    snapshot,
+                                    status.name ?: "FIIL",
+                                    status.address.orEmpty(),
+                                    status.earType,
                                 )
                             }
                         }
-                        FiilAction.ACTION_STATE -> {
-                            // 完整状态快照：这里是唯一能同时拿到电量 + 模式 + earType 的地方。
-                            intent.getStringExtra(FiilAction.EXTRA_JSON)
-                                ?.let { lastStatus = FiilStatus.fromJson(it) }
+                    }.onFailure { error ->
+                        // Keep even diagnostic failures from rethrowing into the Bluetooth host.
+                        runCatching { logW("FIIL receiver dispatch failed", error) }
+                        runCatching {
+                            appendLog(
+                                "receiver dispatch FAILED: ${error.javaClass.simpleName}: ${error.message}",
+                            )
                         }
                     }
                 }
@@ -345,6 +445,7 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
         name: String,
         address: String,
         earType: Int = -1,
+        skipIsland: Boolean = false,
     ) {
         if (ctx == null) return
         // 「焦点通知」总开关在这里生效：关掉时既不弹提示、也不刷常驻通知，
@@ -371,25 +472,47 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
             cancelNotification(ctx)
             return
         }
-        // 超级岛两条通道互斥（对齐 refs/OppoPods 的 registerNotificationReceiver）：
-        //  - OFFICIAL：走宿主「官方强提示」通道（showBatteryToast → StatusBarManager#setStatus），
-        //    由 SystemUI 用系统耳机资源渲染，也就是用户在系统里见过的那个样子；
-        //  - MODULE：走模块自制岛（FocusIslandUtil），此时**不能**再发官方强提示，
-        //    否则两条岛同时下发会互相顶掉，表现为「岛上电量一闪就空」。
-        //  - NONE：两条都不发，只留常驻焦点通知。
-        val islandMode = runCatching {
-            moe.chenxy.fiilpods.config.ConfigManager.islandMode()
-        }.getOrDefault(moe.chenxy.fiilpods.config.ConfigManager.ISLAND_MODE_OFFICIAL)
+        // 常驻耳机卡片与超级岛是两条独立链路：时机配置只决定是否弹岛，
+        // 绝不能阻断通知栏电量/型号图刷新。
+        updateNotification(ctx, snapshot, name, address, earType)
+        if (skipIsland) return
+
+        // 超级岛两条通道互斥：
+        //  - OFFICIAL：固定只在本次连接的第一份有效电量快照触发；设置页并不向用户
+        //    暴露官方岛的细分时机，不能把 MODULE 专属配置套到这里；
+        //  - MODULE：才按 islandShowTimings 的连接/佩戴/摘下边沿触发；
+        //  - NONE：不发任何岛，只保留上面的常驻焦点通知。
+        val islandMode = runCatching { ConfigManager.islandMode() }
+            .getOrDefault(ConfigManager.ISLAND_MODE_OFFICIAL)
+        val connectedTrigger = !hasSeenIslandConnection
+        if (connectedTrigger) hasSeenIslandConnection = true
+
+        val status = lastStatus
+        val moduleTrigger = if (islandMode == ConfigManager.ISLAND_MODE_MODULE) {
+            val policy = runCatching { IslandTimingPolicy(ConfigManager.islandShowTimings()) }
+                .getOrElse { IslandTimingPolicy(emptySet()) }
+            val wearTrigger = status?.let {
+                policy.triggerForWear(lastIslandWearLeft, lastIslandWearRight, it)
+            }
+            (connectedTrigger && policy.allows(IslandTrigger.CONNECTED)) || wearTrigger != null
+        } else {
+            false
+        }
+        // 无论当前岛来源是什么，都维护可靠的佩戴基线；下次切到模块岛时不会把首帧误弹成事件。
+        if (status != null) {
+            lastIslandWearLeft = status.wearLeft
+            lastIslandWearRight = status.wearRight
+        }
+
         when (islandMode) {
-            moe.chenxy.fiilpods.config.ConfigManager.ISLAND_MODE_MODULE ->
+            ConfigManager.ISLAND_MODE_MODULE -> if (moduleTrigger) {
                 showModuleFocusIsland(ctx, snapshot, address)
-
-            moe.chenxy.fiilpods.config.ConfigManager.ISLAND_MODE_OFFICIAL ->
+            }
+            ConfigManager.ISLAND_MODE_OFFICIAL -> if (connectedTrigger) {
                 showBatteryToast(ctx, snapshot, name)
-
+            }
             else -> Unit
         }
-        updateNotification(ctx, snapshot, name, address, earType)
     }
 
     /**

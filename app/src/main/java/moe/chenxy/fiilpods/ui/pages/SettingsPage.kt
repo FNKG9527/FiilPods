@@ -91,11 +91,12 @@ fun SettingsPage(
         stringResource(R.string.island_mode_official),
         stringResource(R.string.island_mode_module),
     )
+    // The protocol has no trustworthy in-case transition. Keep it out of the UI rather than
+    // advertising a timing option that IslandTimingPolicy intentionally never emits.
     val islandShowTimingOptions = listOf(
         ConfigManager.ISLAND_SHOW_TIMING_CONNECTED to stringResource(R.string.island_show_timing_connected),
         ConfigManager.ISLAND_SHOW_TIMING_WEARING to stringResource(R.string.island_show_timing_wearing),
         ConfigManager.ISLAND_SHOW_TIMING_REMOVED to stringResource(R.string.island_show_timing_removed),
-        ConfigManager.ISLAND_SHOW_TIMING_IN_CASE to stringResource(R.string.island_show_timing_in_case),
     )
     val islandShowTimingEntries = remember(islandShowTimings.value, islandShowTimingOptions) {
         listOf(

@@ -70,6 +70,8 @@ object FiilAction {
     const val EXTRA_CMD = "cmd"
     const val EXTRA_VALUE = "value"
     const val EXTRA_FLAG = "flag"
+    /** 自适应开关类别（[FiilRfcommController.AdaptiveKind.name]，仅 cmd=adaptive 使用）。 */
+    const val EXTRA_ADAPTIVE_KIND = "adaptive_kind"
     const val EXTRA_ENABLED = "enabled"
     const val EXTRA_LEFT_BATTERY = "left_battery"
     const val EXTRA_LEFT_CHARGING = "left_charging"

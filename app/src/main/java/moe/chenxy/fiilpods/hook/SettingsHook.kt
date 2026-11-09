@@ -14,6 +14,10 @@ import moe.chenxy.fiilpods.pods.FiilAction
 import moe.chenxy.fiilpods.pods.FiilConfig
 import moe.chenxy.fiilpods.pods.FiilModels
 import moe.chenxy.fiilpods.pods.FiilStatus
+import moe.chenxy.fiilpods.pods.NoiseControlMode
+import moe.chenxy.fiilpods.pods.ancMiuiStateFromWire
+import moe.chenxy.fiilpods.pods.toWireMode
+import moe.chenxy.fiilpods.utils.miuiStrongToast.data.OppoPodsAction
 import java.util.WeakHashMap
 
 /**
@@ -581,21 +585,32 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
     /**
      * 卡片上的操作 → 蓝牙进程。
      *
-     * 走的是和模块 UI 完全相同的 [FiilAction.ACTION_COMMAND] 通道，
-     * 所以协议细节与失败回退逻辑只需在蓝牙进程里实现一份。
+     * 普通命令与自适应开关走 [FiilAction.ACTION_COMMAND]；LDAC 则复用既有
+     * [OppoPodsAction.ACTION_LDAC_SET] 路径，保证耳机开关与 A2DP 偏好同步。
      */
     private fun dispatchCardCommand(cmd: String, value: Int?, flag: Boolean?) {
         val ctx = context ?: return
+        val route = CardCommandRoute.normalize(cmd, value, flag)
         runCatching {
-            ctx.sendBroadcast(
-                Intent(FiilAction.ACTION_COMMAND).apply {
-                    putExtra(FiilAction.EXTRA_CMD, cmd)
-                    value?.let { putExtra(FiilAction.EXTRA_VALUE, it) }
-                    flag?.let { putExtra(FiilAction.EXTRA_FLAG, it) }
-                    setPackage("com.android.bluetooth")
-                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            val intent = when (route) {
+                is CardCommandRoute.Adaptive -> Intent(FiilAction.ACTION_COMMAND).apply {
+                    putExtra(FiilAction.EXTRA_CMD, "adaptive")
+                    putExtra(FiilAction.EXTRA_ADAPTIVE_KIND, route.kind)
+                    putExtra(FiilAction.EXTRA_FLAG, route.enabled)
                 }
-            )
+                is CardCommandRoute.Ldac -> Intent(OppoPodsAction.ACTION_LDAC_SET).apply {
+                    putExtra(OppoPodsAction.EXTRA_LDAC_ENABLED, route.enabled)
+                }
+                is CardCommandRoute.Command -> Intent(FiilAction.ACTION_COMMAND).apply {
+                    putExtra(FiilAction.EXTRA_CMD, route.command)
+                    route.value?.let { putExtra(FiilAction.EXTRA_VALUE, it) }
+                    route.flag?.let { putExtra(FiilAction.EXTRA_FLAG, it) }
+                }
+            }.apply {
+                setPackage("com.android.bluetooth")
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            }
+            ctx.sendBroadcast(intent)
             logD("card command: $cmd value=$value flag=$flag")
         }.onFailure { logW("dispatch card command failed", it) }
     }
@@ -751,21 +766,32 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
         }.onFailure { logW("inject fragment status failed", it) }
     }
 
-    /** MIUI 的 ANC 三段式：0=关 / 1=降噪 / 2=通透。 */
-    private fun settingsAncMode(): String = when (currentAnc) {
-        1 -> "1"
-        2 -> "2"
-        else -> "0"
-    }
+    /**
+     * MIUI 的 ANC 三段式：0=关 / 1=降噪 / 2=通透。
+     *
+     * `currentAnc` 存的是**协议线值**，必须按当前型号的方言解码：直接 `when (currentAnc)`
+     * 是 Mate 视角，会把 GAIA 机型的 raw 2（监听）显示成「通透」、raw 3（开放）显示成
+     * 「关」。解码不出语义（`-1` 尚未拿到状态、或遇到未知线值）时沿用旧行为给 `0`。
+     */
+    private fun settingsAncMode(): String =
+        when (ancMiuiStateFromWire(currentEarType, currentAnc)) {
+            1 -> "1"
+            2 -> "2"
+            else -> "0"
+        }
 
-    private fun settingsAncLevel(): String = when (currentAnc) {
-        1 -> LEVEL_DEEP
-        2 -> LEVEL_TRANSPARENCY
-        3 -> LEVEL_TRANSPARENCY
-        4 -> LEVEL_TRANSPARENCY
-        0 -> LEVEL_OFF
-        else -> LEVEL_OFF
-    }
+    /**
+     * MIUI 的 ANC 细档位载荷。
+     *
+     * 系统只有「深度降噪 / 通透 / 关」三种 level 字符串；FIIL 的监听与风中在系统语义上
+     * 都算「让外界声音进来」，映射成 [LEVEL_TRANSPARENCY]。同样按方言解码。
+     */
+    private fun settingsAncLevel(): String =
+        when (ancMiuiStateFromWire(currentEarType, currentAnc)) {
+            1 -> LEVEL_DEEP
+            2 -> LEVEL_TRANSPARENCY
+            else -> LEVEL_OFF
+        }
 
     private fun settingsBatteryString(): String = settingsBatteryValues().joinToString(",")
 
@@ -871,11 +897,16 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
     }
 
     private fun setAnc(mode: Int) {
-        currentAnc = mode
+        val semantic = when (mode) {
+            1 -> NoiseControlMode.NOISE_CANCELLATION
+            2 -> NoiseControlMode.TRANSPARENCY
+            else -> NoiseControlMode.OFF
+        }
+        currentAnc = semantic.toWireMode(currentEarType)
         val ctx = context ?: return
         ctx.sendBroadcast(
             Intent(FiilAction.ACTION_ANC_SELECT).apply {
-                putExtra(FiilAction.EXTRA_STATUS, mode)
+                putExtra(FiilAction.EXTRA_STATUS, currentAnc)
                 setPackage("com.android.bluetooth")
                 addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             }

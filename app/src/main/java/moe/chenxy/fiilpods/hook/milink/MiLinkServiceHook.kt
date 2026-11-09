@@ -14,12 +14,17 @@ import moe.chenxy.fiilpods.R
 import moe.chenxy.fiilpods.config.ConfigManager
 import moe.chenxy.fiilpods.hook.HookContext
 import moe.chenxy.fiilpods.hook.HookEntry
+import moe.chenxy.fiilpods.pods.AncSemantic
+import moe.chenxy.fiilpods.pods.AncWireCodec
+import moe.chenxy.fiilpods.pods.AncWireDialect
 import moe.chenxy.fiilpods.pods.BatterySnapshot
 import moe.chenxy.fiilpods.pods.FiilAction
 import moe.chenxy.fiilpods.pods.FiilConfig
-import moe.chenxy.fiilpods.pods.FiilMate
 import moe.chenxy.fiilpods.pods.FiilModels
 import moe.chenxy.fiilpods.pods.FiilStatus
+import moe.chenxy.fiilpods.pods.MiLinkCardFeatureGate
+import moe.chenxy.fiilpods.pods.ancDialectForEarType
+import moe.chenxy.fiilpods.pods.ancMiuiStateFromWire
 
 /**
  * HyperOS「融合设备中心」（下拉控制中心里的耳机卡片）的伪造层。
@@ -219,6 +224,17 @@ class MiLinkServiceHook(
     /** [pendingAncTarget] 的下发时刻（`elapsedRealtime` 毫秒）。 */
     @Volatile
     private var pendingAncAt: Long = 0L
+
+    /**
+     * [pendingAncTarget] 是按哪种方言编码的线值。
+     *
+     * Mate 与 GAIA 在 raw 2/3 上含义相反（Mate 2=通透、3=兼听；GAIA 2=兼听、3=通透），
+     * 所以拿「另一种方言编码的目标值」去比较 `ACTION_STATE` 里的线值会永远不相等，
+     * 结算窗口就变成「永远在等」——期间所有真实回包都被丢弃，界面卡在目标值不动。
+     * 换了耳机（`earType` 变了 → 方言变了）就必须让旧窗口失效。
+     */
+    @Volatile
+    private var pendingAncDialect: AncWireDialect = AncWireDialect.MATE
     @Volatile
     private var cinemaMode: Boolean = false
     @Volatile
@@ -237,6 +253,15 @@ class MiLinkServiceHook(
     private var caseCharging: Boolean = false
     @Volatile
     private var earType: Int = -1
+
+    /**
+     * 当前连接的耳机说哪种 ANC 线值方言。
+     *
+     * 每次采纳 `ACTION_STATE` 时按 `status.isMate` 重算；换耳机时若方言变了，
+     * 旧的结算窗口必须作废（见 [pendingAncDialect]）。
+     */
+    @Volatile
+    private var ancWireDialect: AncWireDialect = AncWireDialect.MATE
     @Volatile
     private var deviceName: String? = null
 
@@ -298,9 +323,9 @@ class MiLinkServiceHook(
             // `AncBatteryController.setAncStateBlock` 的判断是
             // `if (iCloseAnc != 1) return 201 /* request failed */`，
             // 任何非 1 的返回值都会让整次降噪切换被判定为失败。
-            hookAncCommand(className, "openAnc", FiilMate.Maf.NOISE_CANCEL, OP_DISPATCHED)
-            hookAncCommand(className, "closeAnc", FiilMate.Maf.OFF, OP_DISPATCHED)
-            hookAncCommand(className, "openTransparent", FiilMate.Maf.OPEN, OP_DISPATCHED)
+            hookAncCommand(className, "openAnc", AncSemantic.NC, OP_DISPATCHED)
+            hookAncCommand(className, "closeAnc", AncSemantic.OFF, OP_DISPATCHED)
+            hookAncCommand(className, "openTransparent", AncSemantic.TRANSPARENCY, OP_DISPATCHED)
         }
         listOf(CLS_MX_MANAGER, CLS_MX_SERVICE).forEach { className ->
             hookAddressResult(className, "isMiTWS") { true }
@@ -476,13 +501,20 @@ class MiLinkServiceHook(
         }.onFailure { logW("$className.$methodName(String) skipped", it) }
     }
 
-    private fun hookAncCommand(className: String, methodName: String, maf: Int, result: Int) {
+    /**
+     * 融合中心三个降噪按钮的下发拦截。
+     *
+     * [semantic] 是**语义档位**，不是线值：Mate 与 GAIA 在 raw 2/3 上相反，
+     * 传线值会让 GAIA 机型把「通透」发成「兼听」。真正的线值在这里按当前方言编码。
+     */
+    private fun hookAncCommand(className: String, methodName: String, semantic: AncSemantic, result: Int) {
         runCatching {
             hookBefore(findMethod(className, methodName, BluetoothDevice::class.java)) { param ->
                 val device = param.args[0] as? BluetoothDevice ?: return@hookBefore
                 if (!isFiilDevice(device)) return@hookBefore
                 cacheOwner(className, param.instance)
                 captureContext(param.instance)
+                val maf = AncWireCodec.wireFromSemantic(ancDialect(), semantic)
                 ancMode = maf
                 // 同 hookAncStateBlock：开结算窗口，防止旧值快照回灌导致界面闪回。
                 markAncPending(maf)
@@ -671,6 +703,14 @@ class MiLinkServiceHook(
                 currentAddress = status.address ?: currentAddress
                 deviceName = status.name ?: deviceName
                 earType = status.earType
+                // 方言跟着设备走：`isMate` 是那条负载自己的判定，比 earType 查表更可靠
+                // （伪装型号、未知新机型都能覆盖）。方言变了 → 旧结算窗口的目标线值
+                // 是在另一种编码下算出来的，拿来比较永远不相等，必须就地作废。
+                val incomingDialect = if (status.isMate) AncWireDialect.MATE else AncWireDialect.GAIA
+                if (incomingDialect != ancWireDialect) {
+                    ancWireDialect = incomingDialect
+                    pendingAncTarget = -1
+                }
                 // ⚠️ 这里**不能**无条件采纳 status.ancMode。
                 //
                 // 蓝牙进程的 publishState() 是随时触发的（电量心跳、A2DP 事件、连接
@@ -707,11 +747,13 @@ class MiLinkServiceHook(
                 notifyPanel(UPDATE_BATTERY)
             }
             FiilAction.ACTION_CONFIG_CHANGED -> {
-                // 设置页改了「伪装耳机型号」：重读远端 prefs 后把控制中心整块重建一次，
-                // 否则 getDeviceId() 的注入值还是旧的，控制中心会把耳机当成未知设备。
+                // 设置页改了「伪装耳机型号」或 MiLink 面板选择：先重读远端 prefs，
+                // 再通知每个受配置影响的卡片区域重绘，避免旧选择一直留在控制中心。
                 refreshConfigFromPrefs()
                 notifyPanel(UPDATE_BATTERY)
                 notifyPanel(UPDATE_ANC)
+                notifyPanel(UPDATE_SPATIAL)
+                notifyPanel(UPDATE_GAME_MODE)
             }
         }
     }
@@ -721,22 +763,41 @@ class MiLinkServiceHook(
     // ------------------------------------------------------------------
 
     /**
+     * 当前连接耳机所用的 ANC 线值方言。
+     *
+     * `ancMode` 里存的是**协议线值**，不是语义档位。Mate 与 GAIA 在 raw 2/3 上含义相反，
+     * 所以「线值 → MIUI 三态」和「MIUI 三态 → 线值」两个方向都必须按同一方言编码，
+     * 否则 GAIA 机型上「点通透」会下发「兼听」的线值，界面也跟着显示错档。
+     *
+     * 来源优先级：`ACTION_STATE` 里 `isMate`（对那条负载最权威）> `earType` 查表 >
+     * 未知型号回落到 Mate（保持历史行为）。
+     */
+    private fun ancDialect(): AncWireDialect = ancWireDialect
+
+    /** FIIL MAF 线值 → MIUI 三态（0 关 / 1 降噪 / 2 通透）。未知线值按「关」处理。 */
+    private fun miuiStateFromWire(raw: Int): Int = ancMiuiStateFromWire(ancDialect(), raw) ?: 0
+
+    /**
      * FIIL MAF 五态 → MIUI 三态。
      *
      * MIUI 的系统侧只有三档（关 / 降噪 / 通透），FIIL 的「开放」「兼听」「风中」
      * 都归到「通透」——它们在系统语义上都属于「让外界声音进来」。
      */
-    fun miLinkAncState(): Int = when (ancMode) {
-        FiilMate.Maf.NOISE_CANCEL -> 1
-        FiilMate.Maf.OPEN, FiilMate.Maf.LISTEN, FiilMate.Maf.WIND -> 2
-        else -> 0
-    }
+    fun miLinkAncState(): Int = miuiStateFromWire(ancMode)
 
-    /** MIUI 三态 → FIIL MAF。系统只发这三档，其余档位只能在模块自己的界面里选。 */
-    private fun mafFromMiLink(mode: Int): Int = when (mode) {
-        1 -> FiilMate.Maf.NOISE_CANCEL
-        2 -> FiilMate.Maf.OPEN
-        else -> FiilMate.Maf.OFF
+    /**
+     * MIUI 三态 → FIIL MAF **线值**（按当前方言编码）。
+     *
+     * 系统只发这三档，其余档位只能在模块自己的界面里选。
+     * `2` 在 Mate 上是 raw 2（通透），在 GAIA 上必须是 raw 3 —— 这是本函数存在的全部理由。
+     */
+    private fun mafFromMiLink(mode: Int): Int {
+        val semantic = when (mode) {
+            1 -> AncSemantic.NC
+            2 -> AncSemantic.TRANSPARENCY
+            else -> AncSemantic.OFF
+        }
+        return AncWireCodec.wireFromSemantic(ancDialect(), semantic)
     }
 
     /**
@@ -793,12 +854,18 @@ class MiLinkServiceHook(
 
     fun spatialPanelEnabled(): Boolean {
         loadState()
-        return earType > 0 && FiilModels.supportsCinema(earType)
+        return MiLinkCardFeatureGate.spatialPanelEnabled(
+            earType,
+            ConfigManager.milinkCardFeatures(),
+        )
     }
 
     fun gameModePanelEnabled(): Boolean {
         loadState()
-        return earType > 0 && FiilModels.supportsMateMaf(earType)
+        return MiLinkCardFeatureGate.gameModePanelEnabled(
+            earType,
+            ConfigManager.milinkCardFeatures(),
+        )
     }
 
     fun updateCinema(on: Boolean) {
@@ -1032,6 +1099,7 @@ class MiLinkServiceHook(
     private fun markAncPending(target: Int) {
         pendingAncTarget = target
         pendingAncAt = android.os.SystemClock.elapsedRealtime()
+        pendingAncDialect = ancDialect()
     }
 
     /** 广播里没带 device 对象，用地址反查。 */
@@ -1092,12 +1160,8 @@ class MiLinkServiceHook(
         }
     }
 
-    /** 供 [syncAncModel] 用：不依赖成员字段 ancMode，直接按传入 maf 算。 */
-    fun miLinkAncStateFrom(maf: Int): Int = when (maf) {
-        FiilMate.Maf.NOISE_CANCEL -> 1
-        FiilMate.Maf.OPEN, FiilMate.Maf.LISTEN, FiilMate.Maf.WIND -> 2
-        else -> 0
-    }
+    /** 供 [syncAncModel] 用：不依赖成员字段 ancMode，直接按传入线值算（按当前方言解码）。 */
+    fun miLinkAncStateFrom(maf: Int): Int = miuiStateFromWire(maf)
 
     private fun currentDevice(): BluetoothDevice? {
         val address = currentAddress ?: return null
@@ -1205,6 +1269,10 @@ class MiLinkServiceHook(
             cinemaMode = prefs.getBoolean("cinema", cinemaMode)
             lowLatency = prefs.getBoolean("low_latency", lowLatency)
             earType = prefs.getInt("ear_type", earType)
+            // 进程刚起来、还没收到 ACTION_STATE 时，先用落盘的 earType 查表定方言，
+            // 否则第一次 getAncState 会按 Mate 解码 GAIA 机型的线值（2/3 相反）。
+            // 之后任何一条 ACTION_STATE 进来都会用它的 isMate 覆写（对那条负载最权威）。
+            if (earType > 0) ancWireDialect = ancDialectForEarType(earType)
             leftBattery = prefs.getInt("left_battery", leftBattery)
             rightBattery = prefs.getInt("right_battery", rightBattery)
             caseBattery = prefs.getInt("case_battery", caseBattery)

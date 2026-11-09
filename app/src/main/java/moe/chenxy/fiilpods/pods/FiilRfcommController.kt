@@ -308,24 +308,24 @@ object FiilRfcommController {
     var ancMode: Int = -1
         private set
 
-    /**
-     * 刚下发、尚未被耳机回包确认的 ANC 目标值；-1 表示没有待确认的切换。
-     *
-     * 为什么要单独记一份：`setAnc()` 已经把 [ancMode] 乐观写成目标值，但耳机从
-     * 收到命令到真的切换完成有 1~2 秒延迟，这期间它可能先回报一次**旧状态**
-     * （MAF_STATUS / ANC GAIA 回报都可能）。若直接采纳，[ancMode] 就被打回旧值，
-     * 紧接着的 `publishState()` 让融合中心闪回旧模式，等真回包到了再闪回新模式 ——
-     * 正是用户看到的「闪一下原来的模式再闪一下通透」。
-     *
-     * 处理：结算窗口内只接受与目标值一致的回包，不一致的按过期回报丢弃。
-     * 窗口由 [ANC_CONFIRM_WINDOW_MS] 兜底，所以耳机真切换失败时最终仍会显示真实值。
-     */
+    /** Last device-reported ANC value; unlike [ancMode], this is never optimistic. */
     @Volatile
-    private var pendingAncTarget: Int = -1
+    private var lastConfirmedAncMode: Int = -1
 
-    /** [pendingAncTarget] 的下发时刻（`elapsedRealtime` 毫秒）。 */
+    /**
+     * 刚下发、尚未被耳机状态回包确认的 ANC 请求。
+     *
+     * `setAnc()` 会先乐观写 [ancMode]，而 MAF_STATUS / GAIA ANC 回报可能在耳机
+     * 完成切换前先送来旧状态。确认窗口内只有与目标一致的状态能结算这条请求；
+     * 每次请求都保存独立对象，避免较早同值请求的超时清掉较晚的目标。
+     */
+    private val ancConfirmationLock = Any()
+
     @Volatile
-    private var pendingAncAt: Long = 0L
+    private var pendingAncConfirmation: AncConfirmationPolicy.Pending? = null
+
+    /** 与 [pendingAncConfirmation] 同生命周期的命令确认；只可按对象身份结算。 */
+    private var pendingAncOp: PendingOp? = null
 
     /** 左 / 右 / 盒电量，-1 表示未知。 */
     @Volatile
@@ -432,6 +432,10 @@ object FiilRfcommController {
     /** 自定义 EQ 的 10 段原始字节；空数组表示还没读到。 */
     @Volatile
     var eqBands: IntArray = IntArray(0)
+        private set
+    /** 最近一次 EQ_STATUS 的保留位；写回预设/增益必须沿用，不可固定为 0。 */
+    @Volatile
+    var eqReserved: Int = 0
         private set
 
     /**
@@ -697,6 +701,29 @@ object FiilRfcommController {
         readerThread = null
         writeQueue.clear()
 
+        // GATT 回调可在 connectGatt() 返回前后的 binder 线程抵达。因此和 SPP 一样，
+        // 所有身份/方言状态必须先准备好，绝不能在 connect() 之后才改 parser。
+        deviceAddress = device.address
+        deviceName = preferredDisplayName(device)
+        deviceOriginalName = runCatching { device.name }.getOrNull()
+        val manual = FiilConfig.readEarTypeOverride(appContext)
+        val bound = FiilConfig.readEarTypeForAddress(appContext, device.address)
+        val nameType = FiilModels.earTypeOfName(device.name)
+        earType = when {
+            manual > 0 -> manual
+            bound > 0 -> bound
+            else -> nameType
+        }
+        earTypeOverridden = manual > 0
+        isMateDialect = earType > 0 && FiilModels.isMateDialect(earType)
+        val initialDialect = when {
+            earType <= 0 -> null
+            isMateDialect -> FrameDialect.MATE
+            else -> FrameDialect.GAIA
+        }
+        FiilGatt.setDialect(initialDialect)
+        var gaiaCatchUpStarted = false
+
         FiilGatt.onStateChanged = { up ->
             if (up) {
                 onGattReady(device)
@@ -704,25 +731,26 @@ object FiilRfcommController {
                 onGattLost()
             }
         }
-        FiilGatt.onFrame = { frame -> dispatchMate(frame) }
+        FiilGatt.onMateFrame = { frame -> dispatchMate(frame) }
+        FiilGatt.onGaiaFrame = { frame -> dispatch(frame) }
+        FiilGatt.onDialectDetected = { detected ->
+            if (detected == FrameDialect.GAIA && earType < 0 && !gaiaCatchUpStarted) {
+                gaiaCatchUpStarted = true
+                isMateDialect = false
+                Log.i(TAG, "detected Gaia dialect over GATT; refreshing Gaia state")
+                // 未知型号初始握手会按 Mate 走；确认 GAIA 后必须补齐 eartype/电量/ANC 等
+                // 查询，不能只翻发送方言而留下空状态。
+                runCatching { FIILProtocol.refreshAll() }
+                    .onFailure { Log.w(TAG, "Gaia catch-up queries failed: ${it.message}") }
+            }
+        }
         FiilGatt.onBytes = {
             lastRxAt = System.currentTimeMillis()
+            everReceivedData = true
             if (preferCustomNext != null) preferCustomNext = null
         }
         val launched = FiilGatt.connect(ctx, device)
         if (launched) {
-            deviceAddress = device.address
-            deviceName = preferredDisplayName(device)
-            deviceOriginalName = runCatching { device.name }.getOrNull()
-            val manual = FiilConfig.readEarTypeOverride(appContext)
-            val bound = FiilConfig.readEarTypeForAddress(appContext, device.address)
-            val nameType = FiilModels.earTypeOfName(device.name)
-            earType = when {
-                manual > 0 -> manual
-                bound > 0 -> bound
-                else -> nameType
-            }
-            earTypeOverridden = manual > 0
             Log.i(TAG, "gatt connect launched to ${FiilConfig.maskAddress(device.address)} earType=$earType")
         }
         return launched
@@ -1019,16 +1047,10 @@ object FiilRfcommController {
         reconnectAfterMultipoint = true
     }
 
-    /** 畅连切换中的状态广播：让 UI 显示「切换中」而不是「已断开」。 */
+    /** 畅连切换中的状态广播：让所有状态消费者显示「切换中」而不是「已断开」。 */
     private fun publishSwitchingState() {
         val ctx = appContext ?: return
-        runCatching {
-            ctx.sendBroadcast(
-                Intent(FiilAction.ACTION_STATE)
-                    .setPackage(FiilConfig.MODULE_PACKAGE)
-                    .putExtra(FiilAction.EXTRA_JSON, snapshotJson())
-            )
-        }
+        broadcastState(ctx, snapshotJson())
         runCatching { OppoCompatBridge.publishSwitching(ctx, force = false) }
     }
 
@@ -1157,6 +1179,7 @@ object FiilRfcommController {
         writeQueue.clear()
         earType = -1
         ancMode = -1
+        lastConfirmedAncMode = -1
         batteryLeft = -1
         batteryRight = -1
         batteryCase = -1
@@ -1168,6 +1191,7 @@ object FiilRfcommController {
         cinemaMode = false
         multipoint = false
         eqBands = IntArray(0)
+        eqReserved = 0
         wearDetect = false
         noiseAdaptive = false
         windAdaptive = false
@@ -1180,6 +1204,11 @@ object FiilRfcommController {
         // 用户看到的是连接已断开，不该再叠一条操作失败提示。
         pendingOps.clear()
         pendingTargets.clear()
+        pendingTargetsInt.clear()
+        synchronized(ancConfirmationLock) {
+            pendingAncConfirmation = null
+            pendingAncOp = null
+        }
         lastRxAt = 0L
     }
 
@@ -1345,6 +1374,7 @@ object FiilRfcommController {
                 // UI 用的是 0 起的列表下标，所以要减 3；自定义统一归到 -1（无选中项）。
                 FiilMate.Query.EQ_STATUS -> {
                     if (frame.payload.size >= 3) {
+                        eqReserved = frame.byteAt(0)
                         val type = frame.byteAt(1, -1)
                         eqIndex = when {
                             type in 3..14 -> type - 3
@@ -1365,9 +1395,7 @@ object FiilRfcommController {
                 }
                 FiilMate.Query.MAF_STATUS -> {
                     val v = frame.byteAt(0, -1)
-                    if (v in 0..4) {
-                        applyAncFromDevice(v)
-                        ackOp(KEY_ANC)
+                    if (v in 0..4 && applyAncFromDevice(v)) {
                         publishState()
                     }
                 }
@@ -1481,7 +1509,12 @@ object FiilRfcommController {
                             wearDetect = pendingTargets.remove(KEY_WEAR) ?: !wearDetect
                             ackOp(KEY_WEAR)
                         }
-                        FiilMate.Cid.SET_MAF -> ackOp(KEY_ANC)
+                        FiilMate.Cid.SET_MAF -> {
+                            // cid=44 only says that the SET frame was accepted; it does not carry
+                            // the resulting MAF mode.  Wait for MAF_STATUS / MAF notify to prove
+                            // the target, then acknowledge the identity-bound ANC operation there.
+                            requestAuthoritativeAncReadback()
+                        }
                         FiilMate.Cid.SET_EQ -> ackOp(KEY_EQ)
                     }
                     publishState()
@@ -1609,9 +1642,7 @@ object FiilRfcommController {
                         5 -> FiilMate.Maf.LISTEN
                         else -> raw
                     }
-                    if (v in 0..4) {
-                        applyAncFromDevice(v)
-                        ackOp(KEY_ANC)
+                    if (v in 0..4 && applyAncFromDevice(v)) {
                         publishState()
                     }
                 }
@@ -1782,45 +1813,67 @@ object FiilRfcommController {
 
     private fun handleAnc(frame: FiilGaia.Frame) {
         val v = FiilGaia.byteAt(frame, 1, -1)
-        if (v in 0..4) {
-            applyAncFromDevice(v)
-            ackOp(KEY_ANC)
+        if (v in 0..4 && applyAncFromDevice(v)) {
             publishState()
         }
     }
 
     /**
-     * 采纳耳机回报的 ANC 档位，但跳过「切换还没落定」窗口里的过期回报。
+     * Applies an authoritative ANC/MAF status report.
      *
-     * 三个回包入口都走这里：[FiilMate.Query.MAF_STATUS]、Mate 主动通知、
-     * [handleAnc]（GAIA）。它们原来都是直接 `ancMode = v`，于是用户刚点完
-     * 「通透」、耳机还没切完时收到的那条**旧状态回报**会把乐观值打回去，
-     * 界面闪回旧模式；等真回包到了再闪回新模式。
+     * A stale in-window report is deliberately ignored and, crucially, cannot consume the current
+     * ANC operation.  Only an in-window report equal to the pending raw target settles that exact
+     * operation.  A post-window report is still adopted as device truth, but its command is left
+     * to the timeout path so it is never mistaken for a success.
      *
-     * 规则：
-     *  - 没有待确认目标（`pendingAncTarget < 0`）→ 正常采纳；
-     *  - 窗口已过 → 正常采纳并清掉目标（耳机最终说了算，失败就该显示失败）；
-     *  - 窗口内且回包与目标一致 → 采纳并清掉目标（提前确认，后续恢复正常采纳）；
-     *  - 窗口内但回包不一致 → **丢弃**，这是切换途中的过期快照。
+     * @return whether callers should publish the newly accepted device state.
      */
-    private fun applyAncFromDevice(value: Int) {
-        val target = pendingAncTarget
-        if (target < 0) {
-            ancMode = value
-            return
+    private fun applyAncFromDevice(value: Int): Boolean {
+        var timeout: AncTimeout? = null
+        val accepted = synchronized(ancConfirmationLock) {
+            val pending = pendingAncConfirmation
+            val decision = AncConfirmationPolicy.evaluateReply(
+                pending = pending,
+                deviceValue = value,
+                nowMs = android.os.SystemClock.elapsedRealtime(),
+                confirmationWindowMs = ANC_CONFIRM_WINDOW_MS,
+            )
+            if (!decision.acceptDeviceValue) {
+                Log.i(TAG, "anc reply $value ignored, pending target=${pending?.target}")
+                false
+            } else {
+                // This is the only place that records device truth.  setAnc() may set ancMode
+                // optimistically, but it must never advance this confirmed value itself.
+                ancMode = value
+                lastConfirmedAncMode = value
+                if (
+                    pending != null &&
+                    AncConfirmationPolicy.isCurrent(pendingAncConfirmation, pending)
+                ) {
+                    when {
+                        decision.confirmsPendingOperation -> {
+                            pendingAncConfirmation = null
+                            val op = pendingAncOp
+                            pendingAncOp = null
+                            if (op != null) ackOp(KEY_ANC, op)
+                        }
+                        decision.clearPendingTarget -> {
+                            // A post-window report is authoritative state, not evidence that the
+                            // command completed in time.  Retire only this exact request as failed.
+                            pendingAncConfirmation = null
+                            val op = pendingAncOp
+                            pendingAncOp = null
+                            if (op != null && pendingOps.remove(KEY_ANC, op)) {
+                                timeout = AncTimeout(AncRequest(pending, op), value)
+                            }
+                        }
+                    }
+                }
+                true
+            }
         }
-        if (android.os.SystemClock.elapsedRealtime() - pendingAncAt >= ANC_CONFIRM_WINDOW_MS) {
-            // 窗口已过：耳机没有在预期时间内确认，以它回报的为准。
-            pendingAncTarget = -1
-            ancMode = value
-            return
-        }
-        if (value == target) {
-            pendingAncTarget = -1
-            ancMode = value
-            return
-        }
-        Log.i(TAG, "anc reply $value ignored, pending target=$target")
+        timeout?.let { reportAncConfirmationTimeout(it.request, it.authoritativeMode) }
+        return accepted
     }
 
     // ------------------------------------------------------------------
@@ -1956,31 +2009,32 @@ object FiilRfcommController {
      * 但耳机按键切换模块能看见」的根因（接收走 cid=40 NOTIFY，正常；发送走错协议族）。
      */
     fun setAnc(mode: Int) {
-        expectAckIfChanged(KEY_ANC, "降噪切换", mode) { ancMode }
-        // ⚠️ 必须先乐观写入本地值，再发命令。
-        //
-        // 这个顺序是「切换时图标闪一下旧值再闪回新值」的唯一成因：
-        //  1. UI 点了「通透」→ miLink 进程立刻把 AncBatteryModel.ancState 写成 2，
-        //     并 postDelayed 发 HeadsetModeChanged，界面马上显示「通透」（正确）；
-        //  2. 同一个调用里 sendAncSelect() 把 ACTION_ANC_SELECT 发到蓝牙进程，
-        //     走到这里发出 FIIL 命令 —— 但耳机回包 MAF_STATUS 要 1~2 秒才到，
-        //     这期间 `ancMode` 还是旧值（降噪=1）；
-        //  3. 期间任何一次 publishState()（电量心跳、A2DP 事件、连接状态刷新）
-        //     都会用 snapshot() 把 **旧值** 打包进 ACTION_STATE 广播出去；
-        //  4. miLink 进程收到 ACTION_STATE 后无条件执行 `ancMode = status.ancMode`
-        //     （MiLinkServiceHook.handleBroadcast），于是界面闪回「降噪」；
-        //  5. 等耳机回包到达、ancMode 更新为 2，再 publishState()，界面又闪回「通透」。
-        // 用户看到的正是「闪一下旧值、再闪一下新值」。
-        //
-        // 修法：把本地值提前到发命令之前写。这样上面第 3 步广播出去的就已经是目标值，
-        // 不会再出现旧值回灌。若耳机最终没切成功，expectAckIfChanged 的 2.5s 超时
-        // 机制仍会走 broadcastOpFailed() 把真实回读值纠正回来（见 expectAck 的
-        // `if (now == op.beforeValue)` 分支），所以不会把失败伪装成成功。
-        ancMode = mode
-        // 同时登记待确认目标：窗口内耳机若先回报旧状态（切换还没落定时很常见），
-        // applyAncFromDevice 会把它当过期快照丢弃，避免乐观值被打回去。
-        pendingAncTarget = mode
-        pendingAncAt = android.os.SystemClock.elapsedRealtime()
+        // Keep this public API raw: SettingsControlCard provides dialect-labelled wire values, so
+        // clamping or remapping belongs only to the higher-level setMAFMode convenience API.
+        val request = synchronized(ancConfirmationLock) {
+            val before = ancMode
+            // Preserve setAnc's raw-wire behavior even when the known state already equals mode:
+            // still send the frame below.  Only create a new confirmation operation when this is a
+            // state change or supersedes an already optimistic request.
+            if (before == mode && pendingAncConfirmation == null) {
+                null
+            } else {
+                val pending = AncConfirmationPolicy.Pending(
+                    target = mode,
+                    sentAtMs = android.os.SystemClock.elapsedRealtime(),
+                )
+                val op = PendingOp(KEY_ANC, "降噪切换", before) { ancMode }
+                pendingOps[KEY_ANC] = op
+                pendingAncConfirmation = pending
+                pendingAncOp = op
+                // Publish the requested value while the device converges; only a matching status
+                // reply is allowed to turn that optimistic value into a successful operation.
+                ancMode = mode
+                AncRequest(pending, op)
+            }
+        }
+
+        request?.let(::scheduleAncConfirmationTimeout)
         if (isMateDialect && FiilModels.supportsMateMaf(earType)) {
             RfcommLog.i(appContext, TAG, "setAnc -> MATE cid=44 mode=$mode")
             sendMate(FiilMate.Cid.SET_MAF, 0, byteArrayOf(mode.toByte()))
@@ -2125,6 +2179,11 @@ object FiilRfcommController {
             earType = if (bound > 0) bound else FiilModels.earTypeOfName(deviceOriginalName)
         }
         isMateDialect = FiilModels.isMateDialect(earType)
+        if (FiilGatt.isConnected) {
+            // TX dialect changes immediately; reset GATT RX under the same parser lock so a
+            // fragmented old-dialect frame cannot be decoded as the newly selected protocol.
+            FiilGatt.setDialect(FrameDialect.fromMate(isMateDialect))
+        }
         Log.i(TAG, "earType override -> $value (effective=$earType mate=$isMateDialect)")
         publishState()
     }
@@ -2150,6 +2209,7 @@ object FiilRfcommController {
         cinemaMode = cinemaMode,
         multipoint = multipoint,
         eqBands = eqBands,
+        eqReserved = eqReserved,
         wearDetect = wearDetect,
         noiseAdaptive = noiseAdaptive,
         windAdaptive = windAdaptive,
@@ -2217,6 +2277,18 @@ object FiilRfcommController {
         val readValue: () -> Int,
     )
 
+    /** A concrete ANC request binds its target identity to the one pending operation it may settle. */
+    private data class AncRequest(
+        val pending: AncConfirmationPolicy.Pending,
+        val op: PendingOp,
+    )
+
+    /** A post-window status response that must be reported as a timeout, not as success. */
+    private data class AncTimeout(
+        val request: AncRequest,
+        val authoritativeMode: Int,
+    )
+
     /** 命令确认超时。取 2.5s：FIIL+ 自己的 CommandQueue 也是 3s 超时。 */
     private const val OP_TIMEOUT_MS = 2500L
 
@@ -2269,7 +2341,7 @@ object FiilRfcommController {
         val op = PendingOp(key, label, runCatching(read).getOrDefault(-1), read)
         pendingOps[key] = op
         opHandler.postDelayed({
-            if (pendingOps.remove(key) == null) return@postDelayed   // 已确认
+            if (!pendingOps.remove(key, op)) return@postDelayed   // 已确认，或被更新的同键操作接管
             val now = runCatching(read).getOrDefault(-1)
             if (now == op.beforeValue) {
                 Log.w(TAG, "op not confirmed: $label (value still $now)")
@@ -2303,9 +2375,10 @@ object FiilRfcommController {
      * 写自定义 EQ 时 `eqIndex` 恒为 -1（自定义），若按值不变判失败会误报。
      */
     private fun expectAckStrict(key: String, label: String) {
-        pendingOps[key] = PendingOp(key, label, Int.MIN_VALUE) { Int.MAX_VALUE }
+        val op = PendingOp(key, label, Int.MIN_VALUE) { Int.MAX_VALUE }
+        pendingOps[key] = op
         opHandler.postDelayed({
-            if (pendingOps.remove(key) == null) return@postDelayed
+            if (!pendingOps.remove(key, op)) return@postDelayed
             Log.w(TAG, "op not confirmed (strict): $label")
             broadcastOpFailed(label, -1)
         }, OP_TIMEOUT_MS)
@@ -2319,6 +2392,75 @@ object FiilRfcommController {
     /** 某个命令收到了回包，撤销对应的待确认记录。 */
     private fun ackOp(key: String) {
         pendingOps.remove(key)
+    }
+
+    /**
+     * 只结算**同一条**请求：回包可能来自更早的同键操作，
+     * 若无条件 `remove(key)` 会把后来那条请求的超时也一起取消。
+     */
+    private fun ackOp(key: String, op: PendingOp) {
+        pendingOps.remove(key, op)
+    }
+
+    /**
+     * ANC 超时兜底。
+     *
+     * 与通用 [expectAck] 不同：ANC 的「当前值」在 `setAnc()` 里已被乐观改成目标值，
+     * 因此不能用「值没变」判断失败。只要到点仍没有回包确认这条请求，就必须
+     *  1. 作废乐观目标（否则 UI 会永久显示一个耳机并未采用的档位）；
+     *  2. 主动回读一次权威状态（`requestMafMode`），让真实值覆盖乐观值；
+     *  3. 广播一次操作失败，告诉用户这次没生效。
+     */
+    private fun scheduleAncConfirmationTimeout(request: AncRequest) {
+        opHandler.postDelayed({
+            val authoritativeFallback = synchronized(ancConfirmationLock) {
+                if (!AncConfirmationPolicy.isCurrent(pendingAncConfirmation, request.pending)) {
+                    null
+                } else {
+                    pendingAncConfirmation = null
+                    pendingAncOp = null
+                    pendingOps.remove(KEY_ANC, request.op)
+                    // The only local value set by setAnc() is optimistic.  Once the matching
+                    // request expires, discard it immediately rather than displaying it as truth
+                    // while the query below is in flight.  -1 correctly means "not yet known".
+                    ancMode = lastConfirmedAncMode
+                    lastConfirmedAncMode
+                }
+            }
+            if (authoritativeFallback == null) return@postDelayed
+            Log.w(TAG, "anc command not confirmed within ${ANC_CONFIRM_WINDOW_MS}ms")
+            publishState()
+            requestAuthoritativeAncReadback()
+            broadcastOpFailed(request.op.label, authoritativeFallback)
+        }, ANC_CONFIRM_WINDOW_MS)
+    }
+
+    /**
+     * 一条请求在确认窗口之外才收到回包时走的路径。
+     *
+     * 报文只是设备真相，不是这条命令的「成功回执」，所以这里按超时处理：
+     * 通知用户没生效、并把真实值交给上层；不再重复回读（回包已经带来真实值）。
+     */
+    private fun reportAncConfirmationTimeout(request: AncRequest, deviceValue: Int) {
+        Log.w(TAG, "anc reply arrived after the confirmation window: ${request.pending.target} -> $deviceValue")
+        broadcastOpFailed(request.op.label, deviceValue)
+    }
+
+    /**
+     * SET_MAF 的 cid=44 回包只证明「SET 帧被接受」，不携带切换后的档位，
+     * 因此这里主动回读一次权威状态；确认与否由 [applyAncFromDevice] 结算。
+     */
+    private fun requestAuthoritativeAncReadback() {
+        runCatching {
+            if (FiilModels.supportsAnc(earType)) {
+                FIILProtocol.requestMafMode()
+            } else {
+                // setAnc() deliberately supports raw controller calls before model detection and
+                // mirrors unsupported-Mate fallback with GAIA.  Do not turn timeout recovery into
+                // a no-op merely because the model gate has not resolved yet.
+                queryAnc()
+            }
+        }.onFailure { Log.w(TAG, "anc readback failed: ${it.message}") }
     }
 
     /**
@@ -2355,18 +2497,9 @@ object FiilRfcommController {
         val ctx = appContext ?: return
         val json = snapshotJson()
 
-        // 1) 模块自己的 UI
-        // 必须用 MODULE_PACKAGE 而不是 ctx.packageName —— ctx 是蓝牙进程的 Context，
-        // 它的 packageName 是 com.android.bluetooth。历史上这里写成 ctx.packageName，
-        // 导致状态广播全部绕回蓝牙进程本身，模块 UI（moe.chenxy.fiilpods 进程）
-        // 一条也收不到，表现就是「耳机已连接但界面一直显示未连接」。
-        runCatching {
-            ctx.sendBroadcast(
-                Intent(FiilAction.ACTION_STATE)
-                    .setPackage(FiilConfig.MODULE_PACKAGE)
-                    .putExtra(FiilAction.EXTRA_JSON, json)
-            )
-        }
+        // 1) 完整状态：模块 UI 与已注入的四个系统宿主必须收到同一份 JSON。
+        // ctx 是蓝牙进程 Context，不能用 ctx.packageName，否则广播会绕回蓝牙进程自己。
+        broadcastState(ctx, json)
 
         // 2) 系统侧：连接状态
         if (force || lastPublishedConnected != isConnected) {
@@ -2415,6 +2548,20 @@ object FiilRfcommController {
         if (force) OppoCompatBridge.resetCache()
         runCatching { OppoCompatBridge.publish(ctx, snapshot(), force) }
             .onFailure { Log.w(TAG, "compat bridge publish failed", it) }
+    }
+
+    /** 把完整快照显式发给模块 UI 与每个已注入的系统宿主。 */
+    private fun broadcastState(ctx: Context, json: String) {
+        StateBroadcastTargets.packages(FiilConfig.MODULE_PACKAGE).forEach { pkg ->
+            runCatching {
+                ctx.sendBroadcast(
+                    Intent(FiilAction.ACTION_STATE)
+                        .setPackage(pkg)
+                        .putExtra(FiilAction.EXTRA_JSON, json)
+                        .addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                )
+            }
+        }
     }
 
     private inline fun broadcastToTargets(

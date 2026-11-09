@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">FiilPods 3.2</string>
+    <string name="app_name">FiilPods 3.3</string>
     <string name="app_subtitle">FIIL Earphones for HyperOS</string>
     <string name="pod_info">Pod Info</string>
     <string name="about">About FiilPods</string>
@@ -75,6 +75,7 @@
     <string name="cancel">Cancel</string>
     <string name="connecting">Connecting...</string>
     <string name="connect_failed">Connection failed. Please make sure the device is nearby and powered on.</string>
+    <string name="operation_failed">Operation did not take effect: %1$s. Try again.</string>
     <string name="retry">Retry</string>
     <string name="bt_permission_required">Bluetooth permission is required to discover earphones.</string>
     <string name="grant_permission">Grant Permission</string>
@@ -123,6 +124,12 @@
     <string name="export_log_done">Exported %1$d log lines (%2$s)</string>
     <string name="export_log_failed">Export failed: %1$s</string>
     <string name="export_log_share_title">Share log file</string>
+    <string name="export_log_share_failed">Log exported, but the share sheet could not open: %1$s</string>
+    <string name="crash_page_title">%1$s · Previous launch crashed</string>
+    <string name="crash_copy_stack">Copy stack trace</string>
+    <string name="crash_clip_label">FiilPods crash</string>
+    <string name="crash_copied">Copied</string>
+    <string name="crash_clear_retry">Clear and retry</string>
     <string name="hide_desktop_icon">Hide Desktop Icon</string>
     <string name="hide_desktop_icon_summary">Hide the launcher icon; open from module manager after hiding</string>
     <string name="cycle_anc">Cycle ANC</string>

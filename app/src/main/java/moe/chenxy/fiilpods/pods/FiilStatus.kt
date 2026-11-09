@@ -34,6 +34,8 @@ data class FiilStatus(
     val multipoint: Boolean = false,
     /** 自定义 EQ 的 10 段增益原始字节（0~255，128 约等于 0 dB）。空数组表示还没读到。 */
     val eqBands: IntArray = IntArray(0),
+    /** EQ 回包的保留位；仅用于诊断，写入时由蓝牙进程使用。 */
+    val eqReserved: Int = 0,
     /**
      * 佩戴检测开关（摘下暂停 / 戴上播放）。
      *
@@ -130,6 +132,7 @@ data class FiilStatus(
         put("cinemaMode", cinemaMode)
         put("multipoint", multipoint)
         put("eqBands", JSONArray().also { arr -> eqBands.forEach { arr.put(it) } })
+        put("eqReserved", eqReserved)
         put("wearDetect", wearDetect)
         put("noiseAdaptive", noiseAdaptive)
         put("windAdaptive", windAdaptive)
@@ -170,6 +173,7 @@ data class FiilStatus(
                     eqBands = o.optJSONArray("eqBands")?.let { arr ->
                         IntArray(arr.length()) { arr.optInt(it, 128) }
                     } ?: IntArray(0),
+                    eqReserved = o.optInt("eqReserved", 0),
                     wearDetect = o.optBoolean("wearDetect", false),
                     noiseAdaptive = o.optBoolean("noiseAdaptive", false),
                     windAdaptive = o.optBoolean("windAdaptive", false),

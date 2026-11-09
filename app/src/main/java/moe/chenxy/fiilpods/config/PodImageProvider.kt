@@ -3,8 +3,10 @@ package moe.chenxy.fiilpods.config
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
+import android.os.Binder
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import moe.chenxy.fiilpods.pods.RfcommLog
@@ -27,21 +29,27 @@ class PodImageProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
     /**
-     * 跨进程日志转发。
+     * Cross-process log forwarding.
      *
-     * 不做权限校验的理由：本 Provider 本来就是 `exported=true`，能被任何应用调到；
-     * 但 `appendLog` 只追加文本、且写入目标固定为模块自己的 `filesDir`，
-     * 调不坏别的东西。最坏情况是别人往里灌垃圾日志——用户导出时看得见，删得掉。
-     *
-     * 返回 `Bundle` 里带 `accepted` 行数，便于宿主进程判断是否真的写进去了。
+     * This provider remains exported for image readers, but its write-like `appendLog` operation
+     * accepts only this module or the platform Bluetooth package. Validate the caller *before*
+     * materializing its array/list, then bound both line count and UTF-8 bytes before disk I/O.
      */
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         if (method != METHOD_APPEND_LOG) return null
         val ctx = context ?: return null
-        val lines = extras?.getStringArray(KEY_LINES) ?: return null
-        if (lines.isEmpty()) return null
-        RfcommLog.appendBridgedLines(ctx, lines.toList())
-        return Bundle().apply { putInt(KEY_ACCEPTED, lines.size) }
+        val callingUid = Binder.getCallingUid()
+        val bluetoothUid = resolveBluetoothUid(ctx.packageManager)
+        if (!isTrustedLogCaller(callingUid, ctx.applicationInfo.uid, bluetoothUid)) {
+            throw SecurityException("log bridge is restricted to the module or Bluetooth UID")
+        }
+
+        val rawLines: Array<out String?> = extras?.getStringArray(KEY_LINES) ?: return null
+        if (!isBoundedAppendPayload(rawLines, MAX_APPEND_LINES, MAX_APPEND_UTF8_BYTES)) return null
+        // Bundle is Java/platform-typed: validation completed before this List allocation.
+        val acceptedLines = rawLines.map(::checkNotNull)
+        val accepted = RfcommLog.appendBridgedLines(ctx, acceptedLines)
+        return Bundle().apply { putInt(KEY_ACCEPTED, accepted) }
     }
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
@@ -83,6 +91,10 @@ class PodImageProvider : ContentProvider() {
     ): Int = 0
 
     companion object {
+        private const val BLUETOOTH_PACKAGE = "com.android.bluetooth"
+        private const val MAX_APPEND_LINES = 20
+        private const val MAX_APPEND_UTF8_BYTES = 64 * 1024
+
         /** `call()` 的方法名：追加若干行日志。 */
         const val METHOD_APPEND_LOG = "appendLog"
 
@@ -91,5 +103,63 @@ class PodImageProvider : ContentProvider() {
 
         /** 返回值的键：实际接收到的行数。 */
         const val KEY_ACCEPTED = "accepted"
+
+        internal fun isTrustedLogCaller(callingUid: Int, moduleUid: Int, bluetoothUid: Int?): Boolean =
+            callingUid == moduleUid || bluetoothUid == callingUid
+
+        /**
+         * Checks the incoming binder payload without converting it to a List or encoding a second
+         * full copy. Each line acquires one newline byte because RfcommLog writes it that way.
+         * Unpaired UTF-16 surrogates are rejected rather than silently replaced and undercounted.
+         */
+        internal fun isBoundedAppendPayload(
+            lines: Array<out String?>,
+            maxLines: Int,
+            maxUtf8Bytes: Int,
+        ): Boolean {
+            if (lines.isEmpty() || lines.size > maxLines || maxUtf8Bytes < 0) return false
+            var used = 0
+            for (line in lines) {
+                // A Binder Bundle is Java/platform-typed, so reject null before any list is made.
+                if (line == null) return false
+                // One incoming value must become exactly one physical log line. Otherwise a caller
+                // could forge additional records (or escape the bounded line-count policy).
+                if (line.indexOf('\n') >= 0 || line.indexOf('\r') >= 0) return false
+                // Reserve the terminating newline which RfcommLog writes for every accepted line.
+                val remainingForLine = maxUtf8Bytes - used - 1
+                val lineBytes = utf8BytesAtMost(line, remainingForLine) ?: return false
+                used += lineBytes + 1
+            }
+            return true
+        }
+
+        private fun resolveBluetoothUid(packageManager: PackageManager): Int? = runCatching {
+            packageManager.getApplicationInfo(BLUETOOTH_PACKAGE, 0).uid
+        }.getOrNull()
+
+        /** Returns null for invalid UTF-16 or when [maxBytes] would be exceeded. */
+        private fun utf8BytesAtMost(value: String, maxBytes: Int): Int? {
+            if (maxBytes < 0) return null
+            var bytes = 0
+            var index = 0
+            while (index < value.length) {
+                val char = value[index]
+                val added = when {
+                    char.code <= 0x7F -> 1
+                    char.code <= 0x7FF -> 2
+                    char.isHighSurrogate() -> {
+                        if (index + 1 >= value.length || !value[index + 1].isLowSurrogate()) return null
+                        index++
+                        4
+                    }
+                    char.isLowSurrogate() -> return null
+                    else -> 3
+                }
+                if (added > maxBytes - bytes) return null
+                bytes += added
+                index++
+            }
+            return bytes
+        }
     }
 }

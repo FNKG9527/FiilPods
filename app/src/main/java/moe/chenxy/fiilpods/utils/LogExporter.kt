@@ -147,7 +147,13 @@ object LogExporter {
     }
 
     private fun StringBuilder.appendConfig(context: Context) {
-        val config = ConfigManager.current()
+        // 直接读一次磁盘上的 prefs 再取快照：`ConfigManager.current()` 是进程内缓存，
+        // 若这时还没人调过 refreshFromPrefs（例如从崩溃恢复后直接进设置页导出），
+        // 快照会静默退回默认值，反而误导排障。读失败才退回缓存。
+        val config = runCatching {
+            val prefs = context.getSharedPreferences(ConfigManager.PREFS_NAME, Context.MODE_PRIVATE)
+            ConfigManager.refreshFromPrefs(prefs)
+        }.getOrElse { ConfigManager.current() }
         appendLine("--- 配置快照 ---")
         appendLine("伪设备 ID      : ${config.fakeDeviceId}")
         appendLine("超级岛模式     : ${config.islandMode} (${islandModeLabel(config.islandMode)})")

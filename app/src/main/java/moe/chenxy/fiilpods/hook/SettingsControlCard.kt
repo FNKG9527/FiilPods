@@ -74,16 +74,29 @@ internal object SettingsControlCard {
         var active: Boolean = false
     }
 
+    /** 单个自适应能力的整行、开关与蓝牙进程稳定枚举名。 */
+    private class AdaptiveControl(
+        val row: LinearLayout,
+        val switch: Switch,
+        val kind: String,
+    )
+
     /** 卡片内所有需要随状态刷新的控件引用。 */
     private class Holder(
         val title: TextView,
         val battery: TextView,
+        val mafRow: LinearLayout,
         val mafChips: LinearLayout,
         val latencyChips: LinearLayout,
         val cinemaRow: LinearLayout,
         val cinemaSwitch: Switch,
         val multipointRow: LinearLayout,
         val multipointSwitch: Switch,
+        val wearRow: LinearLayout,
+        val wearSwitch: Switch,
+        val ldacRow: LinearLayout,
+        val ldacSwitch: Switch,
+        val adaptiveControls: List<AdaptiveControl>,
         val flag: BindingFlag,
         /** 下发通道，MAF 档位行重建时需要重新绑定点击。 */
         val dispatch: (String, Int?, Boolean?) -> Unit,
@@ -131,15 +144,23 @@ internal object SettingsControlCard {
             holder.battery.visibility = if (battery.isEmpty()) View.GONE else View.VISIBLE
 
             val earType = s.earType
-            if (holder.builtMafEarType != earType) {
+            val mafSupported = earType > 0 && FiilModels.supportsAnc(earType)
+            holder.mafRow.visibility = if (mafSupported) View.VISIBLE else View.GONE
+            if (!mafSupported) {
+                holder.mafChips.removeAllViews()
+                holder.mafButtons = emptyList()
+                holder.builtMafEarType = Int.MIN_VALUE
+            } else if (holder.builtMafEarType != earType) {
                 rebuildMafRow(holder, earType)
                 holder.builtMafEarType = earType
             }
             holder.mafButtons.forEach { (chip, mode) ->
-                styleChip(chip, selected = s.ancMode == mode)
+                styleChip(chip, selected = s.ancMode == mode, enabled = s.connected && mafSupported)
             }
+            // Do not invent a low-latency capability table: expose the established three modes,
+            // but never make a command chip interactive for a disconnected device.
             holder.latencyButtons.forEach { (chip, wire) ->
-                styleChip(chip, selected = s.lowLatencyLevel == wire)
+                styleChip(chip, selected = s.lowLatencyLevel == wire, enabled = s.connected)
             }
 
             val cinemaSupported = earType > 0 && FiilModels.supportsCinema(earType)
@@ -151,6 +172,23 @@ internal object SettingsControlCard {
             holder.multipointRow.visibility = if (multipointSupported) View.VISIBLE else View.GONE
             holder.multipointSwitch.isChecked = s.multipoint
             holder.multipointSwitch.isEnabled = s.connected
+
+            val wearSupported = earType > 0 && FiilModels.supportsWearDetect(earType)
+            holder.wearRow.visibility = if (wearSupported) View.VISIBLE else View.GONE
+            holder.wearSwitch.isChecked = s.wearDetect
+            holder.wearSwitch.isEnabled = s.connected && wearSupported
+
+            val ldacSupported = earType > 0 && FiilModels.supportsLdac(earType)
+            holder.ldacRow.visibility = if (ldacSupported) View.VISIBLE else View.GONE
+            holder.ldacSwitch.isChecked = s.ldacEnabled
+            holder.ldacSwitch.isEnabled = s.connected && ldacSupported && s.ldacUnlocked
+
+            holder.adaptiveControls.forEach { control ->
+                val supported = supportsAdaptive(control.kind, earType)
+                control.row.visibility = if (supported) View.VISIBLE else View.GONE
+                control.switch.isChecked = adaptiveEnabled(s, control.kind)
+                control.switch.isEnabled = s.connected && supported
+            }
         } finally {
             holder.flag.active = false
         }
@@ -188,6 +226,8 @@ internal object SettingsControlCard {
         card.addView(battery)
 
         val (mafRow, mafChips) = buildChipRow(ctx, "调噪模式")
+        // earType arrives with the first state update; avoid exposing an empty/unsupported MAF row.
+        mafRow.visibility = View.GONE
         card.addView(mafRow)
 
         val cinemaSwitch = newSwitch(ctx, dispatch, flag, "cinema")
@@ -210,6 +250,27 @@ internal object SettingsControlCard {
         val multipointRow = buildSwitchRow(ctx, "蓝牙畅连", multipointSwitch)
         card.addView(multipointRow)
 
+        val wearSwitch = newSwitch(ctx, dispatch, flag, "wear")
+        val wearRow = buildSwitchRow(ctx, "佩戴检测", wearSwitch)
+        card.addView(wearRow)
+
+        val ldacSwitch = newSwitch(ctx, dispatch, flag, "ldac")
+        val ldacRow = buildSwitchRow(ctx, "LDAC 高清解码", ldacSwitch)
+        card.addView(ldacRow)
+
+        val adaptiveControls = listOf(
+            "环境自适应降噪" to "NOISE",
+            "自适应抗风噪" to "WIND",
+            "耳道自适应降噪" to "EAR",
+            "自适应 EQ" to "EQ",
+            "云感调音" to "TUNING",
+        ).map { (label, kind) ->
+            val switch = newAdaptiveSwitch(ctx, dispatch, flag, kind)
+            val row = buildSwitchRow(ctx, label, switch)
+            card.addView(row)
+            AdaptiveControl(row = row, switch = switch, kind = kind)
+        }
+
         val eqRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -229,12 +290,18 @@ internal object SettingsControlCard {
         val holder = Holder(
             title = title,
             battery = battery,
+            mafRow = mafRow,
             mafChips = mafChips,
             latencyChips = latencyChips,
             cinemaRow = cinemaRow,
             cinemaSwitch = cinemaSwitch,
             multipointRow = multipointRow,
             multipointSwitch = multipointSwitch,
+            wearRow = wearRow,
+            wearSwitch = wearSwitch,
+            ldacRow = ldacRow,
+            ldacSwitch = ldacSwitch,
+            adaptiveControls = adaptiveControls,
             flag = flag,
             dispatch = dispatch,
         )
@@ -251,6 +318,10 @@ internal object SettingsControlCard {
      */
     private fun rebuildMafRow(holder: Holder, earType: Int) {
         holder.mafChips.removeAllViews()
+        if (!FiilModels.supportsAnc(earType)) {
+            holder.mafButtons = emptyList()
+            return
+        }
         val mate = FiilModels.isMateDialect(earType)
         val modes = when {
             mate && FiilModels.supportsMateMafFive(earType) -> listOf(0, 1, 2, 3, 4)
@@ -335,6 +406,32 @@ internal object SettingsControlCard {
         }
     }
 
+    /** 自适应命令保留稳定的蓝牙进程枚举名，而不是 UI 文案。 */
+    private fun newAdaptiveSwitch(
+        ctx: Context,
+        dispatch: (String, Int?, Boolean?) -> Unit,
+        flag: BindingFlag,
+        kind: String,
+    ): Switch = newSwitch(ctx, dispatch, flag, "adaptive:$kind")
+
+    private fun supportsAdaptive(kind: String, earType: Int): Boolean = when (kind) {
+        "NOISE" -> FiilModels.supportsNoiseAdaptive(earType)
+        "WIND" -> FiilModels.supportsWindAdaptive(earType)
+        "EAR" -> FiilModels.supportsEarAdaptive(earType)
+        "EQ" -> FiilModels.supportsEqAdaptive(earType)
+        "TUNING" -> FiilModels.supportsTuning(earType)
+        else -> false
+    }
+
+    private fun adaptiveEnabled(status: FiilStatus, kind: String): Boolean = when (kind) {
+        "NOISE" -> status.noiseAdaptive
+        "WIND" -> status.windAdaptive
+        "EAR" -> status.earAdaptive
+        "EQ" -> status.eqAdaptive
+        "TUNING" -> status.tuning
+        else -> false
+    }
+
     private fun newChip(
         ctx: Context,
         text: String,
@@ -342,7 +439,11 @@ internal object SettingsControlCard {
         cmd: String,
         value: Int?,
         flag: Boolean?,
-    ): TextView = newActionChip(ctx, text) { dispatch(cmd, value, flag) }
+    ): TextView = newActionChip(ctx, text) { dispatch(cmd, value, flag) }.also {
+        // A card can be attached before its first status bind. Command chips must start guarded
+        // and become interactive only after bind confirms an active connection.
+        styleChip(it, selected = false, enabled = false)
+    }
 
     private fun newActionChip(ctx: Context, text: String, onClick: () -> Unit): TextView =
         TextView(ctx).apply {
@@ -350,22 +451,26 @@ internal object SettingsControlCard {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             gravity = Gravity.CENTER
             setPadding(dp(ctx, 12), dp(ctx, 7), dp(ctx, 12), dp(ctx, 7))
-            isClickable = true
-            setOnClickListener { onClick() }
-            styleChip(this, false)
+            setOnClickListener { if (isEnabled) onClick() }
+            styleChip(this, selected = false, enabled = true)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { rightMargin = dp(ctx, 8) }
         }
 
-    private fun styleChip(chip: TextView, selected: Boolean) {
+    private fun styleChip(chip: TextView, selected: Boolean, enabled: Boolean) {
+        chip.isEnabled = enabled
+        chip.isClickable = enabled
+        chip.alpha = if (enabled) 1f else 0.45f
         chip.background = rounded(
             chip.context,
-            if (selected) ACCENT else CHIP_BG_UNSELECTED,
+            if (selected && enabled) ACCENT else CHIP_BG_UNSELECTED,
             16,
         )
-        chip.setTextColor(if (selected) Color.WHITE else textColor(chip.context))
+        chip.setTextColor(
+            if (selected && enabled) Color.WHITE else textColor(chip.context),
+        )
     }
 
     // ------------------------------------------------------------------
