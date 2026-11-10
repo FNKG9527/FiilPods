@@ -991,12 +991,11 @@ fun MainUI(
                 onAutoGameModeChange = {
                     autoGameMode.value = it
                     ConfigManager.updateAutoGameMode(prefs, xposedService, it)
-                    Intent(OppoPodsAction.ACTION_AUTO_GAME_MODE_CHANGED).apply {
-                        setPackage("com.android.bluetooth")
-                        putExtra("enabled", it)
-                        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-                        context.sendBroadcast(this)
-                    }
+                    // ⚠ v3.3.1：这里原来发 ACTION_AUTO_GAME_MODE_CHANGED，但蓝牙进程
+                    // 从来没有注册过这个 action（registerReceiver 的过滤器里没有），
+                    // 等于开关只写了 prefs、运行中的 AutoGameModeRuntime 直到重启才读到。
+                    // 改发模块统一的 CONFIG_CHANGED，接收端会 refreshAutoGameModeConfig()。
+                    broadcastConfigChanged(context, "com.android.bluetooth")
                 },
                 milinkCardFeatures = milinkCardFeatures,
                 onMilinkCardFeaturesChange = {
@@ -1241,16 +1240,18 @@ private fun rebuildBatteryFromInts(intent: Intent): BatteryParams? {
     ) {
         return null
     }
-    fun pod(level: Int): PodParams = PodParams(
+    fun pod(level: Int, charging: Boolean): PodParams = PodParams(
         battery = level.coerceAtLeast(0),
-        isCharging = false,
+        isCharging = charging && level >= 0,
         isConnected = level >= 0,
         rawStatus = level.coerceAtLeast(0),
     )
+    val charging = intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_CHARGING, 0) == 1
     return BatteryParams(
-        left = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_LEFT, -1)),
-        right = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_RIGHT, -1)),
-        case = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_CASE, -1)),
+        left = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_LEFT, -1), charging),
+        right = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_RIGHT, -1), charging),
+        // 0x0306 是耳机整体充电位，盒电不跟着点亮。
+        case = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_CASE, -1), false),
     )
 }
 

@@ -761,6 +761,11 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
             addAction(OppoPodsAction.ACTION_SPATIAL_AUDIO_SET)
             addAction(OppoPodsAction.ACTION_EQ_PRESET_SET)
             addAction(OppoPodsAction.ACTION_EQ_PRESET_SAVE)
+            // 「删除自定义 EQ」以前只有发送端（MainUI.deleteEqPreset），没有接收者，
+            // 点了完全没反应。设备端不存预设列表，删除语义 = 把曲线恢复平直。
+            addAction(OppoPodsAction.ACTION_EQ_PRESET_DELETE)
+            // 旧版 UI 发的自动游戏模式通知（新版已改发 CONFIG_CHANGED，这里保留兼容）。
+            addAction(OppoPodsAction.ACTION_AUTO_GAME_MODE_CHANGED)
             addAction(OppoPodsAction.ACTION_DUAL_DEVICE_CONNECTION_SET)
             addAction(OppoPodsAction.ACTION_TONE_VOLUME_SET)
             addAction(OppoPodsAction.ACTION_LOW_LATENCY_MODE_SET)
@@ -934,6 +939,20 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                                     logW("eq save ignored: got=${gains.size} expect=$expect")
                                 }
                             }
+                        }
+                        OppoPodsAction.ACTION_EQ_PRESET_DELETE -> {
+                            // 设备端没有「预设列表」可删：列表里那条「自定义」是实时曲线。
+                            // 因此删除 = 把自定义 EQ 恢复平直（128 = 0 dB），并走正常写入确认，
+                            // 失败时 UI 会收到 OP_FAILED，而不是像以前那样悄无声息。
+                            val expect = FiilModels.eqBandLabels(FiilRfcommController.earType).size
+                            logI("eq preset delete -> reset flat, bands=$expect")
+                            FIILProtocol.writeEQ(ByteArray(expect) { 128.toByte() })
+                        }
+                        OppoPodsAction.ACTION_AUTO_GAME_MODE_CHANGED -> {
+                            // 兼容旧 UI：prefs 已由发送端写好，这里只需让运行中的
+                            // AutoGameModeRuntime 重读开关（原实现根本没注册这个 action）。
+                            refreshAutoGameModeConfig()
+                            logI("auto game mode changed: enabled=${intent.getBooleanExtra("enabled", false)}")
                         }
                         OppoPodsAction.ACTION_DUAL_DEVICE_CONNECTION_SET -> {
                             FIILProtocol.setMultipoint(intent.getBooleanExtra("enabled", false))

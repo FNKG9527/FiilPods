@@ -7,6 +7,72 @@
 
 ---
 
+## [3.3.1] - 2026-11-10
+
+**按第二轮审计的 P0 清单修数据链。** 这一版只动「读回来的数据是错的/根本没读」
+的地方，不新增功能；每一条都能在源码里指出旧行为错在哪。
+
+### Fixed
+
+- **Mate 机型三路电量**（E1）。`applyMateBattery` 旧实现只取 `payload[1]`，
+  还把同一个值写进左右耳，`batteryCase` 永远是 -1。现在按官方
+  `F045HomeFragment.setElectricity(buff[0]/[1]/[2])` 解析左/右/盒；
+  单字节短包退化成左右同值，`255` 统一当「未知」。
+- **充电状态**（E2）。`GET_BATTERY_CHARGE`(0x0306) 是死常量，UI 里 `isCharging`
+  五处硬编码 false。现在 GAIA 链路在 `refreshAll` 里查询、按官方
+  `analysisGetBatteryCharge` 的 `payload[1]==1` 解析，并沿三条路径下发：
+  `FiilStatus.charging` → 模块状态 JSON → Oppo 兼容广播的 `PodParams.isCharging`
+  \+ `EXTRA_BATTERY_CHARGING`。盒电没有独立充电位，仍显示未知而不是跟着点亮。
+- **GAIA 蓝牙畅连**（E3）。SET 的线值旧实现写 `0/1`，官方是 `1(开)/2(关)`；
+  `dispatch` 也没有 `SET_MULTIPOINT(258)/GET_MULTIPOINT(386)` 分支，
+  发出去必超时。两处都补齐。
+- **GAIA 自定义 EQ**（E4）。回包与 Mate 同构 `[reserved][type][b0..bn]`，
+  旧实现只把 `payload[1]` 存成档位，reserved 和十段增益全丢；且把 ACK 也当状态回包。
+  现在只在 `!isAck` 时解析，reserved/type/bands 全部回填。
+- **Mate 机型的 3D 开关**（E5）。旧实现先登记 `expectAck` 再判断方言，
+  Mate 根本不会回 GAIA `SET_3D`，2.5 秒后必然弹「3D 音效开关失败」。
+  方言判断前移，Mate 直接拒绝并记日志（这类机型用影院模式表达空间感）。
+- **查找耳机**（E6）。Mate 协议族没有 find/search 命令（官方 App 也没有），
+  旧实现无条件发 GAIA `SET_SEARCH`。现在按方言拒绝并返回 false，
+  不再伪装成功。MiLink「找耳机」卡被游戏模式占用的问题仍未改（见下）。
+- **佩戴状态广播类型**（E7）。生产端 `putExtra(Boolean)`、消费端 `getIntExtra`，
+  恒拿到 -1，界面永远显示「未知」。现在生产端发 `WearState` Int
+  （0x07 戴 / 0x05 摘 / -1 未知），并新增 `wearKnown`：没收过回包时不许把
+  初始值 false 当成「已摘下」。
+- **自动游戏模式开关不生效**（E8）。UI 发 `ACTION_AUTO_GAME_MODE_CHANGED`，
+  但蓝牙进程的 `registerReceiver` 过滤器里从来没有这个 action；开关只写了 prefs，
+  运行中的 `AutoGameModeRuntime` 要等重启才读到。现在改发统一的
+  `CONFIG_CHANGED`（接收端本来就会 `refreshAutoGameModeConfig()`），
+  同时保留对旧 action 的兼容接收。
+- **「删除自定义 EQ」是死控件**（E9）。只有发送端没有接收端。现在蓝牙进程接收后
+  把曲线恢复平直（设备端不存预设列表，删除语义只能是这个），失败会走 `OP_FAILED`。
+- **Settings 服务代理两个 Hook 从不触发**（E15）。所给 Settings 包里
+  `getDeviceInfo` / `isSupportAudioSwitch` 只有 `(String)` 重载，旧代码按
+  `(BluetoothDevice)` 注册，`NoSuchMethodException` 被 `hookProxyBefore` 吞掉。
+  两种签名都注册，存在的那个生效。
+- **`updateAtUiInfo` 静默失败**（E16）。`HookContext.callMethod` 只查 `methods`
+  （public），而 MIUI 的 `updateAtUiInfo` 是 package-private。改为先查 public、
+  再沿继承链查 `declaredMethods` 并 `setAccessible(true)`。
+- **日志兜底写进宿主私有目录**（E17）。`appendHostFallback` 把行写进
+  `com.android.bluetooth` 的 `filesDir`，模块进程（另一个 UID）永远读不到、
+  调试页也导不出，只是白占宿主存储。改为只记一条 warning，让丢弃可见。
+
+### Known limits
+
+- **EQ 增益换算未动**：UI 拖杆 ±6 dB，`BluetoothProcessHook` 按
+  `128 + gain*128/12` 写线值。官方 App 是把回包原始字节直接当滑杆值回写的，
+  两套假设冲突，静态无法裁决 —— 留真机对比后再改。
+- **GAIA 帧版本位未动**：`0x0719/0x071A/0x070B/0x070C` 仍用 `0xF1`（新版），
+  官方 3.5.2 对这四条用 `0x01`。改错会让现有能用的机型全哑，留真机 A/B。
+- **Mate 自适应/LDAC/语音音量查询**：协议族本身没有 GAIA 对应命令，
+  不是「漏查」，而是能力不存在；要改的是 UI 门控，不是补查询。
+- **MiLink「找耳机」卡**仍与游戏模式共用位置；**通透人声增强**、
+  **smartAnc 档位**仍只有消费端没有生产端；**固件版本**仍只写日志；
+  **型号覆盖**仍只有底层。以上都属 P1，见
+  `docs/FIXES_v3.3.1.md` 的「未修清单」。
+
+---
+
 ## [3.3.0] - 2026-11-09
 
 **按审计报告把「说了但没做到」的地方补上。** 这一版不是加功能，而是让已有的

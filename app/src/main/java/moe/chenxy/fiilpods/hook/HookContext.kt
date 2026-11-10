@@ -193,8 +193,22 @@ abstract class HookContext(
     }.getOrNull()
 
     fun callMethod(instance: Any?, name: String, vararg args: Any?): Any? = runCatching {
-        val m = (instance?.javaClass ?: return null).methods.firstOrNull {
+        val cls = instance?.javaClass ?: return null
+        // 先查 public（含接口默认方法）；系统 UI 里大量回调是 package-private，
+        // 只查 methods 会静默失败 —— SettingsHook.injectFragmentStatus 的
+        // updateAtUiInfo 就踩过这个坑（hook 装上了，状态却一直不回填）。
+        val m = cls.methods.firstOrNull {
             it.name == name && it.parameterTypes.size == args.size
+        } ?: run {
+            var c: Class<*>? = cls
+            var found: Method? = null
+            while (c != null && found == null) {
+                found = c.declaredMethods.firstOrNull {
+                    !it.isBridge && it.name == name && it.parameterTypes.size == args.size
+                }
+                c = c.superclass
+            }
+            found
         } ?: return null
         m.isAccessible = true
         m.invoke(instance, *args)

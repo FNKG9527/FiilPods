@@ -686,10 +686,12 @@ object RfcommLog {
 
     /** Called only by [remoteBridge]'s worker after an unacknowledged remote batch. */
     private fun appendHostFallback(lines: List<String>) {
-        val context = remoteContext ?: return
-        runCatching {
-            appendLinesToFile(File(context.filesDir, FILE_NAME), lines)
-        }.onFailure { Log.w(TAG, "host fallback log append failed: ${it.message}") }
+        // ⚠️ v3.3.1：这里以前写 `hostContext.filesDir/FILE_NAME`。
+        // 但那是 com.android.bluetooth 的私有目录 —— 模块进程（另一个 UID）读不到，
+        // 调试页导出的也只有模块自己的文件，结果这份「兜底日志」永远没人能看，
+        // 只是白占蓝牙进程的存储。模块侧已经有有界队列 + Provider 重试，
+        // 宿主拿不到 Provider 时只能丢弃；至少让丢弃这件事在 logcat 里可见。
+        Log.w(TAG, "remote log bridge unavailable; dropped ${lines.size} line(s)")
     }
 
     private fun appendLines(context: Context, lines: List<String>) {

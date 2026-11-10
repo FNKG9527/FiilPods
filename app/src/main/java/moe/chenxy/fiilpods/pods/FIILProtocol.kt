@@ -378,7 +378,6 @@ object FIILProtocol {
      *       里同时调用了 `setCommandClassifyId(1)` 与 `setCommandId(1)`，不是无 cmdId）。
      */
     fun setMultipoint(on: Boolean) {
-        val v = if (on) 1.toByte() else 0.toByte()
         FiilRfcommController.expectAckPublicIfChanged("multipoint", "蓝牙畅连切换", if (on) 1 else 0) {
             if (FiilRfcommController.multipoint) 1 else 0
         }
@@ -389,9 +388,20 @@ object FIILProtocol {
             FiilRfcommController.expectMultipointSwitch()
             // cid=1 的 SET 回显不带新值，把目标记下来，回显到达时直接用。
             FiilRfcommController.rememberPendingTarget("multipoint", on)
-            FiilRfcommController.sendMate(FiilMate.Cid.SET_PARAM, MATE_CMD_MULTIPOINT, byteArrayOf(v))
+            FiilRfcommController.sendMate(
+                FiilMate.Cid.SET_PARAM,
+                MATE_CMD_MULTIPOINT,
+                byteArrayOf(if (on) 1 else 0),
+            )
         } else {
-            FiilRfcommController.send(FiilCommands.SET_MULTIPOINT, byteArrayOf(v), newProtocol = false)
+            // ⚠ v3.3.1 修复：官方 setChangLan 的线值是 `z ? 1 : 2`（1=开、2=关），
+            // 不是 0/1。旧实现把「关」发成 0，耳机侧多半按非法值丢弃，
+            // 表现为「关不掉畅连」；同时 dispatch 也补上了 258/386 的解析。
+            FiilRfcommController.send(
+                FiilCommands.SET_MULTIPOINT,
+                byteArrayOf(if (on) 1 else 2),
+                newProtocol = false,
+            )
         }
     }
 
@@ -617,11 +627,27 @@ object FIILProtocol {
         } else {
             requestEarType()
             requestBattery()
+            // 充电位（0x0306）与 EQ 曲线（0x070B）以前只在 Mate 分支查，
+            // GAIA 机型于是永远不知道「在充电」、也永远拿不到 reserved/频段。
+            requestBatteryCharge()
             requestMafMode()
             requestLowLatency()
             requestMultipoint()
             requestWearState()
+            readEQ()
         }
+    }
+
+    /**
+     * 查询充电状态。
+     *
+     * 只有 GAIA 有 `GET_BATTERY_CHARGE`(0x0306)；Mate 协议族没有对应查询，
+     * 因此这里按方言门控。回包 `payload[1]==1` 即充电中
+     * （官方 `GaiaSdkCommand.analysisGetBatteryCharge` → `isOpen()`）。
+     */
+    fun requestBatteryCharge() {
+        if (FiilRfcommController.isMateDialect) return
+        FiilRfcommController.send(FiilCommands.GET_BATTERY_CHARGE, ByteArray(0), newProtocol = false)
     }
 
     /**

@@ -13,8 +13,22 @@ data class FiilStatus(
     val batteryLeft: Int = -1,
     val batteryRight: Int = -1,
     val batteryCase: Int = -1,
+    /**
+     * 是否正在充电（GAIA `GET_BATTERY_CHARGE`(0x0306) 回包 payload[1]==1）。
+     *
+     * 官方 `GaiaSdkCommand.analysisGetBatteryCharge` 的 `isOpen()` 就是读 `bArr[1]==1`。
+     * 这是「耳机整体」的充电位，分不出左/右/盒，因此 UI 只把它显示在耳机电量旁。
+     */
+    val charging: Boolean = false,
     val wearLeft: Boolean = false,
     val wearRight: Boolean = false,
+    /**
+     * 是否已经收到过佩戴回包。
+     *
+     * 旧实现把「没收到过」等同于「没戴」，UI 于是在未连接/未查询时显示「已摘下」。
+     * false 时 UI 应显示「未知」，而不是一个确定状态。
+     */
+    val wearKnown: Boolean = false,
     val eqIndex: Int = -1,
     val is3D: Boolean = false,
     /**
@@ -123,8 +137,10 @@ data class FiilStatus(
         put("batteryLeft", batteryLeft)
         put("batteryRight", batteryRight)
         put("batteryCase", batteryCase)
+        put("charging", charging)
         put("wearLeft", wearLeft)
         put("wearRight", wearRight)
+        put("wearKnown", wearKnown)
         put("eqIndex", eqIndex)
         put("is3D", is3D)
         put("lowLatencyLevel", lowLatencyLevel)
@@ -162,8 +178,10 @@ data class FiilStatus(
                     batteryLeft = o.optInt("batteryLeft", -1),
                     batteryRight = o.optInt("batteryRight", -1),
                     batteryCase = o.optInt("batteryCase", -1),
+                    charging = o.optBoolean("charging", false),
                     wearLeft = o.optBoolean("wearLeft", false),
                     wearRight = o.optBoolean("wearRight", false),
+                    wearKnown = o.optBoolean("wearKnown", false),
                     eqIndex = o.optInt("eqIndex", -1),
                     is3D = o.optBoolean("is3D", false),
                     lowLatencyLevel = o.optInt("lowLatencyLevel", 0),

@@ -39,6 +39,13 @@ object OppoCompatBridge {
     const val EXTRA_BATTERY_CASE = "battery_case"
 
     /**
+     * 充电状态的纯 int 兜底键（1=充电中 / 0=不在充电）。
+     *
+     * 与三个电量 extra 同一条广播，供不读 Parcelable 的接收端重建。
+     */
+    const val EXTRA_BATTERY_CHARGING = "battery_charging"
+
+    /**
      * 「兼听」「风中」在 OppoPods UI 里的状态码。
      *
      * ⚠️ 必须用 9 / 10，不能用 4 / 8。
@@ -69,16 +76,17 @@ object OppoCompatBridge {
         ) {
             return null
         }
-        fun pod(level: Int): PodParams = PodParams(
+        fun pod(level: Int, charging: Boolean): PodParams = PodParams(
             battery = level.coerceAtLeast(0),
-            isCharging = false,
+            isCharging = charging && level >= 0,
             isConnected = level >= 0,
             rawStatus = level.coerceAtLeast(0),
         )
+        val charging = intent.getIntExtra(EXTRA_BATTERY_CHARGING, 0) == 1
         return BatteryParams(
-            left = pod(intent.getIntExtra(EXTRA_BATTERY_LEFT, -1)),
-            right = pod(intent.getIntExtra(EXTRA_BATTERY_RIGHT, -1)),
-            case = pod(intent.getIntExtra(EXTRA_BATTERY_CASE, -1)),
+            left = pod(intent.getIntExtra(EXTRA_BATTERY_LEFT, -1), charging),
+            right = pod(intent.getIntExtra(EXTRA_BATTERY_RIGHT, -1), charging),
+            case = pod(intent.getIntExtra(EXTRA_BATTERY_CASE, -1), false),
         )
     }
 
@@ -207,24 +215,25 @@ object OppoCompatBridge {
     }
 
     private fun publishBattery(ctx: Context, s: FiilStatus, force: Boolean) {
-        val key = "${s.batteryLeft}/${s.batteryRight}/${s.batteryCase}"
+        val key = "${s.batteryLeft}/${s.batteryRight}/${s.batteryCase}/${s.charging}"
         if (!force && lastBattery == key) return
         lastBattery = key
         val params = BatteryParams(
             left = PodParams(
                 battery = s.batteryLeft.coerceAtLeast(0),
-                isCharging = false,
+                isCharging = s.charging && s.batteryLeft >= 0,
                 isConnected = s.batteryLeft >= 0,
                 rawStatus = s.batteryLeft.coerceAtLeast(0),
             ),
             right = PodParams(
                 battery = s.batteryRight.coerceAtLeast(0),
-                isCharging = false,
+                isCharging = s.charging && s.batteryRight >= 0,
                 isConnected = s.batteryRight >= 0,
                 rawStatus = s.batteryRight.coerceAtLeast(0),
             ),
             case = PodParams(
                 battery = s.batteryCase.coerceAtLeast(0),
+                // 0x0306 报的是耳机整体充电位，分不出盒，别替盒子瞎猜。
                 isCharging = false,
                 isConnected = s.batteryCase >= 0,
                 rawStatus = s.batteryCase.coerceAtLeast(0),
@@ -243,19 +252,30 @@ object OppoCompatBridge {
             putExtra(EXTRA_BATTERY_LEFT, s.batteryLeft)
             putExtra(EXTRA_BATTERY_RIGHT, s.batteryRight)
             putExtra(EXTRA_BATTERY_CASE, s.batteryCase)
+            putExtra(EXTRA_BATTERY_CHARGING, if (s.charging) 1 else 0)
         }
     }
 
     private fun publishWear(ctx: Context, s: FiilStatus, force: Boolean) {
-        val key = "${s.wearLeft}/${s.wearRight}"
+        val key = "${s.wearLeft}/${s.wearRight}/${s.wearKnown}"
         if (!force && lastWear == key) return
         lastWear = key
         send(ctx, OppoPodsAction.ACTION_PODS_WEAR_STATUS_CHANGED) {
             putExtra("address", s.address.orEmpty())
-            putExtra("left_wear_status", s.wearLeft)
-            putExtra("right_wear_status", s.wearRight)
+            // ⚠ 接收端 MainUI 读的是 getIntExtra(...)，OppoPods 的佩戴状态是
+            // WearState 的 Int（0x07=戴 / 0x05=摘 / -1=未知）。
+            // 旧实现 putExtra(Boolean)，getIntExtra 恒拿到 -1 —— 界面永远显示「未知」。
+            putExtra("left_wear_status", wearStatusExtra(s.wearLeft, s.wearKnown))
+            putExtra("right_wear_status", wearStatusExtra(s.wearRight, s.wearKnown))
+            // 盒内佩戴位没有协议来源，保持 -1（未知），不要编一个 0x04 出来。
             putExtra("case_wear_status", -1)
         }
+    }
+
+    private fun wearStatusExtra(worn: Boolean, known: Boolean): Int = when {
+        !known -> -1
+        worn -> WearState.WEARING.value
+        else -> WearState.REMOVED.value
     }
 
     /**

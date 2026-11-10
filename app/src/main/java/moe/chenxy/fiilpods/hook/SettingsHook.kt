@@ -300,14 +300,28 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
             if (!isFiilPod(device)) return@hookProxyBefore
             param.setResult(fakeSupport())
         }
+        // ⚠️ v3.3.1：这两个方法在所给 Settings 包里只有 `(String address)` 重载，
+        // 没有 `(BluetoothDevice)`。旧代码按 BluetoothDevice 注册，findMethod 抛
+        // NoSuchMethodException 被 hookProxyBefore 吞掉 → Hook 装上了却从不触发。
+        // 两种签名都注册：存在的那个生效，不存在的只留一行 log。
         hookProxyBefore(CLS_SERVICE_PROXY, "getDeviceInfo", BluetoothDevice::class.java) { param ->
             val device = param.args.getOrNull(0) as? BluetoothDevice
             if (!isFiilPod(device)) return@hookProxyBefore
             param.setResult(fakeSupport())
         }
+        hookProxyBefore(CLS_SERVICE_PROXY, "getDeviceInfo", String::class.java) { param ->
+            val address = param.args.getOrNull(0) as? String
+            if (!isFiilPodAddress(address)) return@hookProxyBefore
+            param.setResult(fakeSupport())
+        }
         hookProxyBefore(CLS_SERVICE_PROXY, "isSupportAudioSwitch", BluetoothDevice::class.java) { param ->
             val device = param.args.getOrNull(0) as? BluetoothDevice
             if (!isFiilPod(device)) return@hookProxyBefore
+            param.setResult("1")
+        }
+        hookProxyBefore(CLS_SERVICE_PROXY, "isSupportAudioSwitch", String::class.java) { param ->
+            val address = param.args.getOrNull(0) as? String
+            if (!isFiilPodAddress(address)) return@hookProxyBefore
             param.setResult("1")
         }
         hookProxyBefore(
@@ -1051,6 +1065,15 @@ class SettingsHook(entry: HookEntry, classLoader: ClassLoader) : HookContext(ent
         val n = address.uppercase()
         return n == currentAddress?.uppercase() || n in knownAddresses
     }
+
+    /**
+     * 只知道地址、拿不到 [BluetoothDevice] 时的判定。
+     *
+     * 服务代理的部分重载只收 String；先用已知地址表，再用 FIIL 的 MAC 前缀兜底
+     * （名字此时拿不到，不能靠名字）。
+     */
+    private fun isFiilPodAddress(address: String?): Boolean =
+        isFiilAddress(address) || FiilConfig.isFiilAddress(address)
 
     /**
      * 判断某个 Activity 是不是被我们伪造出来的耳机详情页。

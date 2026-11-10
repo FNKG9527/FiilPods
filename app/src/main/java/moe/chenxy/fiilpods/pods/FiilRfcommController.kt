@@ -340,12 +340,31 @@ object FiilRfcommController {
     var batteryCase: Int = -1
         private set
 
+    /**
+     * 0x0306 回包里的充电位（payload[1]==1）。
+     *
+     * 只表示「耳机在充电」，分不出左/右/盒；盒电没有独立充电位，UI 不要替它猜。
+     */
+    @Volatile
+    var charging: Boolean = false
+        private set
+
     @Volatile
     var wearLeft: Boolean = false
         private set
 
     @Volatile
     var wearRight: Boolean = false
+        private set
+
+    /**
+     * 是否收到过佩戴回包。
+     *
+     * false 时 [wearLeft]/[wearRight] 的 false 只是初始值，不代表「已摘下」；
+     * 桥接层必须把它翻译成 -1（未知），否则界面一进来就显示两只都摘了。
+     */
+    @Volatile
+    var wearKnown: Boolean = false
         private set
 
     @Volatile
@@ -1183,8 +1202,10 @@ object FiilRfcommController {
         batteryLeft = -1
         batteryRight = -1
         batteryCase = -1
+        charging = false
         wearLeft = false
         wearRight = false
+        wearKnown = false
         eqIndex = -1
         is3D = false
         lowLatencyLevel = 0
@@ -1743,12 +1764,33 @@ object FiilRfcommController {
     }
 
     private fun applyMateBattery(frame: FiilMate.Frame) {
-        val v = frame.byteAt(1, -1).let { if (it == 255) -1 else it }
-        if (v >= 0) {
-            batteryLeft = v
-            batteryRight = v
-            publishState()
+        // 官方 F045HomeFragment.java:307 把整段 payload 交给 setElectricity()，
+        // 后者（:546-551）按 payload[0] / [1] / [2] 分别设置左耳 / 右耳 / 充电盒。
+        //
+        // ⚠️ v3.3.1 修复：旧实现只取 payload[1]，还把同一个值同时写进左右耳，
+        // 于是 (a) 两只耳机电量永远相同，(b) 充电盒电量从不更新（一直是 -1）。
+        val size = frame.payload.size
+        if (size == 0) return
+        fun level(index: Int): Int =
+            if (index < size) frame.byteAt(index, -1).let { if (it == 255) -1 else it } else -1
+
+        val left: Int
+        val right: Int
+        if (size == 1) {
+            // 少数固件只报一个合并值：退化成左右耳同值，而不是丢弃整帧。
+            left = level(0)
+            right = level(0)
+        } else {
+            left = level(0)
+            right = level(1)
         }
+        if (left >= 0) batteryLeft = left
+        if (right >= 0) batteryRight = right
+        if (size >= 3) {
+            val case = level(2)
+            if (case >= 0) batteryCase = case
+        }
+        publishState()
     }
 
     private fun dispatch(frame: FiilGaia.Frame) {
@@ -1783,15 +1825,58 @@ object FiilRfcommController {
                     batteryCase = it
                     publishState()
                 }
+            FiilCommands.GET_BATTERY_CHARGE -> {
+                // 0x0306 回包：payload[1]==1 即充电中
+                // （官方 GaiaSdkCommand.analysisGetBatteryCharge → isOpen(bArr) = bArr[1]==1）。
+                // 旧实现从没发过这条查询，充电状态因此永远是 false。
+                if (frame.payload.size >= 2) {
+                    charging = FiilGaia.byteAt(frame, 1, 0) == 1
+                    publishState()
+                }
+            }
             FiilCommands.GET_WEAR, FiilCommands.GET_WEARING_STATE ->
                 FiilGaia.parseWear(frame)?.let { (l, r) ->
                     wearLeft = l
                     wearRight = r
+                    wearKnown = true
                     publishState()
                 }
-            FiilCommands.GET_EQ, FiilCommands.GET_EQ_V2, FiilCommands.SET_EQ, FiilCommands.SET_EQ_V2 -> {
+            FiilCommands.GET_MULTIPOINT, FiilCommands.SET_MULTIPOINT -> {
+                // 官方 setChangLan 的线值是 `z ? 1 : 2`：1=开启、2=关闭。
+                // 旧实现既没有 GET/SET 分支（SET 必超时），也把关闭写成了 0。
                 val v = FiilGaia.byteAt(frame, 1, -1)
-                if (v >= 0) eqIndex = v
+                if (v == 1 || v == 2) multipoint = v == 1
+                ackOp(KEY_MULTIPOINT)
+                publishState()
+            }
+            FiilCommands.GET_EQ, FiilCommands.GET_EQ_V2, FiilCommands.SET_EQ, FiilCommands.SET_EQ_V2 -> {
+                // 回包与 Mate 同构：[预留][档位][b0..bn]（官方 F046 s0() 把读到的
+                // 整块 buffer 原样回写，[0] 是保留位、[1] 才是档位）。
+                // 旧实现只把 payload[1] 存进 eqIndex，reserved 与各段增益全丢，
+                // 于是 GAIA 机型写自定义 EQ 时 reserved 恒为 0、频段也回填不了。
+                // ACK 帧只用于结算 pending op，不能当成状态回包。
+                if (!frame.isAck) {
+                    val payload = frame.payload
+                    when {
+                        payload.size >= 3 -> {
+                            eqReserved = FiilGaia.byteAt(frame, 0, 0)
+                            val type = FiilGaia.byteAt(frame, 1, -1)
+                            if (type >= 0) eqIndex = type
+                            eqBands = IntArray(payload.size - 2) {
+                                FiilGaia.byteAt(frame, it + 2, 128)
+                            }
+                        }
+                        payload.size == 2 -> {
+                            eqReserved = FiilGaia.byteAt(frame, 0, 0)
+                            val type = FiilGaia.byteAt(frame, 1, -1)
+                            if (type >= 0) eqIndex = type
+                        }
+                        payload.size == 1 -> {
+                            val type = FiilGaia.byteAt(frame, 0, -1)
+                            if (type >= 0) eqIndex = type
+                        }
+                    }
+                }
                 ackOp(KEY_EQ)
                 publishState()
             }
@@ -2066,16 +2151,21 @@ object FiilRfcommController {
     }
 
     fun set3D(on: Boolean) {
-        val wanted = if (on) 1 else 0
-        expectAckIfChanged(KEY_3D, "3D 音效开关", wanted) { if (is3D) 1 else 0 }
         if (isMateDialect) {
             // Mate 没有独立的 3D 开关；能表达「空间感」的只有影院模式（cid=50）。
+            //
+            // ⚠️ v3.3.1 修复：方言判断必须在 expectAckIfChanged **之前**。
+            // 旧实现先登记「等待回显」，然后才 return —— Mate 耳机根本不会回 GAIA
+            // SET_3D，于是 2.5 秒后必然超时并弹一条「3D 音效开关失败」，
+            // 而这次操作其实从一开始就不该发。
             RfcommLog.w(
                 appContext, TAG,
                 "set3D($on) on Mate dialect: no GAIA SET_3D, use cinema(cid=50) instead",
             )
             return
         }
+        val wanted = if (on) 1 else 0
+        expectAckIfChanged(KEY_3D, "3D 音效开关", wanted) { if (is3D) 1 else 0 }
         send(FiilCommands.SET_3D, byteArrayOf(wanted.toByte()), newProtocol = false)
     }
 
@@ -2120,8 +2210,23 @@ object FiilRfcommController {
         }
     }
 
-    /** 寻找耳机（响铃）。 */
-    fun findDevice() = send(FiilCommands.SET_SEARCH, byteArrayOf(1), newProtocol = false)
+    /**
+     * 寻找耳机（响铃）。
+     *
+     * 只有 GAIA 协议族有这条命令（官方 `FFCOMMAND_SET_SEARCH = 265`）。
+     * Mate 协议族（F045~F053）在官方 APP 里也没有对应命令 —— 连常量都不存在，
+     * 所以这里必须先判方言再发帧，不能像旧实现那样无条件发 GAIA 0x0109。
+     *
+     * @return 是否真的发出了命令；Mate 机型返回 false，调用方可据此提示「此机型不支持」。
+     */
+    fun findDevice(): Boolean {
+        if (isMateDialect) {
+            RfcommLog.w(appContext, TAG, "findDevice ignored: Mate 方言没有查找耳机命令")
+            return false
+        }
+        send(FiilCommands.SET_SEARCH, byteArrayOf(1), newProtocol = false)
+        return true
+    }
 
     /**
      * 媒体播放控制。
@@ -2200,8 +2305,10 @@ object FiilRfcommController {
         batteryLeft = batteryLeft,
         batteryRight = batteryRight,
         batteryCase = batteryCase,
+        charging = charging,
         wearLeft = wearLeft,
         wearRight = wearRight,
+        wearKnown = wearKnown,
         eqIndex = eqIndex,
         is3D = is3D,
         lowLatencyLevel = lowLatencyLevel,
@@ -2520,7 +2627,7 @@ object FiilRfcommController {
         // 去重键里带上 earType：通知栏的耳机图案由 earType 决定，如果耳机换了
         // 型号但左右耳/充电盒电量数值碰巧一样（同型号耳机、或多点连接时切到另一台
         // 同型号设备），只按电量去重会导致新图案永远发不出去，通知栏一直显示旧图。
-        val batteryKey = "$batteryLeft/$batteryRight/$batteryCase/$earType"
+        val batteryKey = "$batteryLeft/$batteryRight/$batteryCase/$earType/$charging"
         if (force || lastPublishedBattery != batteryKey) {
             lastPublishedBattery = batteryKey
             broadcastToTargets(ctx, FiilAction.ACTION_PODS_BATTERY_CHANGED) {
