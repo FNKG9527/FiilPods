@@ -560,6 +560,7 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
                     rawStatus = it.battery.coerceAtLeast(0),
                 )
             },
+            headphones = snapshot.headphones,
         )
         runCatching {
             moe.chenxy.fiilpods.utils.FocusIslandUtil.showBatteryIsland(ctx, sp, params, address)
@@ -798,10 +799,16 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
             )
 
             // 三路电量正文：系统原生用「盒 / 左耳 / 右耳」三段拼接，盒电量单独一行。
+            // 头戴式只有一档整体电量，写成「左耳/右耳」是不对的。
             val lines = buildList {
-                snapshot.case?.takeIf { it.connected }?.let { add("充电盒：${it.battery}%${if (it.charging) " ⚡" else ""}") }
-                snapshot.left?.takeIf { it.connected }?.let { add("左耳：${it.battery}%${if (it.charging) " ⚡" else ""}") }
-                snapshot.right?.takeIf { it.connected }?.let { add("右耳：${it.battery}%${if (it.charging) " ⚡" else ""}") }
+                if (snapshot.headphones) {
+                    snapshot.left?.takeIf { it.connected }
+                        ?.let { add("电量：${it.battery}%${if (it.charging) " ⚡" else ""}") }
+                } else {
+                    snapshot.case?.takeIf { it.connected }?.let { add("充电盒：${it.battery}%${if (it.charging) " ⚡" else ""}") }
+                    snapshot.left?.takeIf { it.connected }?.let { add("左耳：${it.battery}%${if (it.charging) " ⚡" else ""}") }
+                    snapshot.right?.takeIf { it.connected }?.let { add("右耳：${it.battery}%${if (it.charging) " ⚡" else ""}") }
+                }
             }
             val content = if (lines.isEmpty()) "未连接" else lines.joinToString("  ")
 
@@ -1029,9 +1036,13 @@ class MiBluetoothToastHook(entry: HookEntry, classLoader: ClassLoader) :
         // 不写这两个字段时息屏只显示一个空卡片。
         runCatching {
             val aodParts = buildList {
-                snapshot.left?.takeIf { it.connected }?.let { add("L ${it.battery}%") }
-                snapshot.right?.takeIf { it.connected }?.let { add("R ${it.battery}%") }
-                snapshot.case?.takeIf { it.connected }?.let { add("盒 ${it.battery}%") }
+                if (snapshot.headphones) {
+                    snapshot.left?.takeIf { it.connected }?.let { add("电量 ${it.battery}%") }
+                } else {
+                    snapshot.left?.takeIf { it.connected }?.let { add("L ${it.battery}%") }
+                    snapshot.right?.takeIf { it.connected }?.let { add("R ${it.battery}%") }
+                    snapshot.case?.takeIf { it.connected }?.let { add("盒 ${it.battery}%") }
+                }
             }
             if (aodParts.isEmpty()) return@runCatching
             val json = org.json.JSONObject(extras.getString("miui.focus.param") ?: "{}")

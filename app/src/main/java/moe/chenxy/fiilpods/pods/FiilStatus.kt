@@ -111,9 +111,18 @@ data class FiilStatus(
 ) {
     val modelName: String get() = FiilModels.nameOf(earType)
 
-    /** 综合电量：优先取左右耳较低值，其次充电盒。 */
+    /**
+     * 是否头戴式（Diva / Wireless / Key Max …）。
+     *
+     * 头戴只有**一档整体电量**，协议里另外两路恒为 0（真机 Key Max 的 Mate 回包是
+     * `[0, 85, 0]`），不能按左右耳 + 盒去展示，否则会出现「左 0 / 右 85 / 盒 0」。
+     */
+    val headphones: Boolean get() = FiilModels.isHeadphones(earType)
+
+    /** 综合电量：头戴取整体值；双耳优先取左右耳较低值，其次充电盒。 */
     val displayBattery: Int
         get() = when {
+            headphones -> batteryLeft
             batteryLeft >= 0 && batteryRight >= 0 -> minOf(batteryLeft, batteryRight)
             batteryLeft >= 0 -> batteryLeft
             batteryRight >= 0 -> batteryRight

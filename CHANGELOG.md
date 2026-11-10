@@ -7,6 +7,45 @@
 
 ---
 
+## [3.3.2] - 2026-11-10
+
+**按耳机形态区分电量展示。** 头戴式（Key Max / Diva 系 / Wireless）只有一档
+整体电量，旧代码按「左 / 右 / 盒」三段解析，真机于是显示成
+「左 0% / 右 85% / 盒 0%」。这一版在解析层就按形态归一化，真无线保持原样。
+
+### Fixed
+
+- **头戴式电量解析**。Mate 电量回包 `[0, 85, 0]` 里只有 `payload[1]` 是整体电量
+  （官方 `F046HomeFragment.setElectricity(buff)` 只做 `m(buff[1])`），
+  `payload[0]` 是保留位、`[2]` 恒为 0。新增 `BatteryPayload.parseMate()` 纯函数，
+  按 `FiilModels.isHeadphones(earType)` 分流：头戴读 `[1]`，右耳/盒置 -1；
+  双耳仍是 `[0]=左 / [1]=右 / [2]=盒`。GAIA 电量分支同样归一化，
+  不再出现「只把整体值写进右耳、左耳留着 0」。
+- **头戴式 UI**。`PodStatus` 头戴只画一列「头戴 85%」，不再渲染左右耳/盒三列；
+  原生设置卡 `batteryText` 只显示「电量 85%」；通知正文、息屏 AOD、焦点岛
+  都改成「电量 85%」，不写 `L:/R:/盒:`。
+- **Oppo 兼容广播**。新增 `battery_headphones` 标记与
+  `EXTRA_BATTERY_HEADPHONES`；头戴时 right/case 传 null、extra 传 -1，
+  接收端不再靠「哪一路是 -1」猜形态（双耳只连一只时右侧同样是 -1）。
+
+### Changed
+
+- `FiilStatus.headphones`（按 earType 计算）与 `displayBattery`：头戴取整体值，
+  双耳仍取左右耳较低值。
+- `BatterySnapshot` 增加 `headphones`；头戴时 `right/case` 为 null。
+  系统设置页仍走三路编码，头戴自然得到 `[85, 255, 255]`。
+- 单测新增 `BatteryFormFactorTest`（13 条），锁住 `[0,85,0]` 的两种解释、
+  短包/255/空包降级、`displayBattery` 聚合与快照置空。
+
+### Known limits
+
+- MiLink 融合卡片的电量列表接口只接受三元素（顺序 case/left/right），
+  头戴仍以 `[-1, 85, -1]` 传入；卡片总电量取 left，不会显示成 0。
+- 强提示右槽仍是官方右耳动画（文案为空），未替换成单耳素材。
+- 头戴没有盒电/分耳充电位，这两项保持「未知」而不是猜一个 0。
+
+---
+
 ## [3.3.1] - 2026-11-10
 
 **按第二轮审计的 P0 清单修数据链。** 这一版只动「读回来的数据是错的/根本没读」

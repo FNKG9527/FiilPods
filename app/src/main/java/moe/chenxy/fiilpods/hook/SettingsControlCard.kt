@@ -508,6 +508,10 @@ internal object SettingsControlCard {
     }
 
     private fun batteryText(status: FiilStatus): String {
+        // 头戴式只有整体电量，不能写成「左 / 右 / 盒」三段。
+        if (status.headphones) {
+            return if (status.batteryLeft >= 0) "电量 ${status.batteryLeft}%" else ""
+        }
         fun part(label: String, value: Int): String? =
             if (value >= 0) "$label $value%" else null
         return listOfNotNull(

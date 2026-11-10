@@ -46,6 +46,14 @@ object OppoCompatBridge {
     const val EXTRA_BATTERY_CHARGING = "battery_charging"
 
     /**
+     * 形态标记：1 = 头戴式（只显示一路整体电量），0 = 双耳式（左右耳 + 盒）。
+     *
+     * 与三个电量 extra 同一条广播。接收端据此决定渲染单列还是三列，
+     * 不能靠 right/case 是否为 -1 去猜 —— 双耳只连一只时右侧同样是 -1。
+     */
+    const val EXTRA_BATTERY_HEADPHONES = "battery_headphones"
+
+    /**
      * 「兼听」「风中」在 OppoPods UI 里的状态码。
      *
      * ⚠️ 必须用 9 / 10，不能用 4 / 8。
@@ -83,11 +91,19 @@ object OppoCompatBridge {
             rawStatus = level.coerceAtLeast(0),
         )
         val charging = intent.getIntExtra(EXTRA_BATTERY_CHARGING, 0) == 1
-        return BatteryParams(
-            left = pod(intent.getIntExtra(EXTRA_BATTERY_LEFT, -1), charging),
-            right = pod(intent.getIntExtra(EXTRA_BATTERY_RIGHT, -1), charging),
-            case = pod(intent.getIntExtra(EXTRA_BATTERY_CASE, -1), false),
-        )
+        val headphones = intent.getIntExtra(EXTRA_BATTERY_HEADPHONES, 0) == 1
+        val left = pod(intent.getIntExtra(EXTRA_BATTERY_LEFT, -1), charging)
+        return if (headphones) {
+            // 头戴只有整体电量：右耳/盒必须为 null，否则 UI 会补出两个 0。
+            BatteryParams(left = left, right = null, case = null, headphones = true)
+        } else {
+            BatteryParams(
+                left = left,
+                right = pod(intent.getIntExtra(EXTRA_BATTERY_RIGHT, -1), charging),
+                case = pod(intent.getIntExtra(EXTRA_BATTERY_CASE, -1), false),
+                headphones = false,
+            )
+        }
     }
 
     /** 上一次广播的值，用于变化检测，避免状态刷新时刷屏。 */
@@ -215,30 +231,42 @@ object OppoCompatBridge {
     }
 
     private fun publishBattery(ctx: Context, s: FiilStatus, force: Boolean) {
-        val key = "${s.batteryLeft}/${s.batteryRight}/${s.batteryCase}/${s.charging}"
+        val headphones = FiilModels.isHeadphones(s.earType)
+        val key = "${s.batteryLeft}/${s.batteryRight}/${s.batteryCase}/${s.charging}/$headphones"
         if (!force && lastBattery == key) return
         lastBattery = key
-        val params = BatteryParams(
-            left = PodParams(
-                battery = s.batteryLeft.coerceAtLeast(0),
-                isCharging = s.charging && s.batteryLeft >= 0,
-                isConnected = s.batteryLeft >= 0,
-                rawStatus = s.batteryLeft.coerceAtLeast(0),
-            ),
-            right = PodParams(
-                battery = s.batteryRight.coerceAtLeast(0),
-                isCharging = s.charging && s.batteryRight >= 0,
-                isConnected = s.batteryRight >= 0,
-                rawStatus = s.batteryRight.coerceAtLeast(0),
-            ),
-            case = PodParams(
-                battery = s.batteryCase.coerceAtLeast(0),
-                // 0x0306 报的是耳机整体充电位，分不出盒，别替盒子瞎猜。
-                isCharging = false,
-                isConnected = s.batteryCase >= 0,
-                rawStatus = s.batteryCase.coerceAtLeast(0),
-            ),
+
+        val leftPod = PodParams(
+            battery = s.batteryLeft.coerceAtLeast(0),
+            isCharging = s.charging && s.batteryLeft >= 0,
+            isConnected = s.batteryLeft >= 0,
+            rawStatus = s.batteryLeft.coerceAtLeast(0),
         )
+        // 头戴式：协议里只有一档整体电量（存在 batteryLeft），右耳/盒没有语义。
+        // 必须传 null 而不是「电量 0 的 PodParams」，否则 UI 会画出两个 0%。
+        val params = if (headphones) {
+            BatteryParams(left = leftPod, right = null, case = null, headphones = true)
+        } else {
+            BatteryParams(
+                left = leftPod,
+                right = PodParams(
+                    battery = s.batteryRight.coerceAtLeast(0),
+                    isCharging = s.charging && s.batteryRight >= 0,
+                    isConnected = s.batteryRight >= 0,
+                    rawStatus = s.batteryRight.coerceAtLeast(0),
+                ),
+                case = PodParams(
+                    battery = s.batteryCase.coerceAtLeast(0),
+                    // 0x0306 报的是耳机整体充电位，分不出盒，别替盒子瞎猜。
+                    isCharging = false,
+                    isConnected = s.batteryCase >= 0,
+                    rawStatus = s.batteryCase.coerceAtLeast(0),
+                ),
+                headphones = false,
+            )
+        }
+        val rightExtra = if (headphones) -1 else s.batteryRight
+        val caseExtra = if (headphones) -1 else s.batteryCase
         send(ctx, OppoPodsAction.ACTION_PODS_BATTERY_CHANGED) {
             putExtra("address", s.address.orEmpty())
             putExtra("status", params)
@@ -250,9 +278,10 @@ object OppoCompatBridge {
             // 而 String/Int/Float 这些基础类型没有这个问题，所以只要这三条 int
             // 在，接收端就永远能重建出电量，不依赖 Parcelable 能不能解出来。
             putExtra(EXTRA_BATTERY_LEFT, s.batteryLeft)
-            putExtra(EXTRA_BATTERY_RIGHT, s.batteryRight)
-            putExtra(EXTRA_BATTERY_CASE, s.batteryCase)
+            putExtra(EXTRA_BATTERY_RIGHT, rightExtra)
+            putExtra(EXTRA_BATTERY_CASE, caseExtra)
             putExtra(EXTRA_BATTERY_CHARGING, if (s.charging) 1 else 0)
+            putExtra(EXTRA_BATTERY_HEADPHONES, if (headphones) 1 else 0)
         }
     }
 

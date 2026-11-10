@@ -45,8 +45,10 @@ object FocusIslandUtil {
         address: String,
     ): Boolean {
         try {
+            val headphones = batteryParams.headphones
             val leftConnected = batteryParams.left?.isConnected == true
-            val rightConnected = batteryParams.right?.isConnected == true
+            // 头戴只有整体电量：右侧不参与，不然岛上会多出一个「-」。
+            val rightConnected = !headphones && batteryParams.right?.isConnected == true
 
             // Need at least one ear connected
             if (!leftConnected && !rightConnected) return false
@@ -78,13 +80,19 @@ object FocusIslandUtil {
             )
 
             val contentParts = mutableListOf<String>()
-            batteryParams.left?.takeIf { leftConnected }?.let { contentParts.add("L: ${it.battery}%") }
-            batteryParams.right?.takeIf { rightConnected }?.let { contentParts.add("R: ${it.battery}%") }
-            // 单耳佩戴时补上盒子电量：另一侧是空的，盒子电量是用户唯一还能看到的数字。
-            // 这里必须判「有一侧没连」，不能判 contentParts.isEmpty() —— 上面只要有任一侧
-            // 连上就必然加过一项，isEmpty() 恒为 false，那段代码是死分支。
-            if (!leftConnected || !rightConnected) {
-                batteryParams.case?.takeIf { it.isConnected }?.let { contentParts.add("盒: ${it.battery}%") }
+            if (headphones) {
+                // 头戴式：整体电量，不写 L/R，更不补盒电。
+                batteryParams.left?.takeIf { leftConnected }
+                    ?.let { contentParts.add("电量 ${it.battery}%") }
+            } else {
+                batteryParams.left?.takeIf { leftConnected }?.let { contentParts.add("L: ${it.battery}%") }
+                batteryParams.right?.takeIf { rightConnected }?.let { contentParts.add("R: ${it.battery}%") }
+                // 单耳佩戴时补上盒子电量：另一侧是空的，盒子电量是用户唯一还能看到的数字。
+                // 这里必须判「有一侧没连」，不能判 contentParts.isEmpty() —— 上面只要有任一侧
+                // 连上就必然加过一项，isEmpty() 恒为 false，那段代码是死分支。
+                if (!leftConnected || !rightConnected) {
+                    batteryParams.case?.takeIf { it.isConnected }?.let { contentParts.add("盒: ${it.battery}%") }
+                }
             }
             val contentText = contentParts.joinToString("  ")
 

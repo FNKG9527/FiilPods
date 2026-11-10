@@ -64,6 +64,7 @@
     <string name="pod_case">Case</string>
     <string name="batt_left_pod">Left</string>
     <string name="batt_right_pod">Right</string>
+    <string name="batt_headphones">Headphones</string>
     <string name="waiting_for_pod">Waiting for OPPO Earphones Connection...</string>
     <string name="select_device">Select Bluetooth Device</string>
     <string name="no_paired_devices">No paired devices found</string>

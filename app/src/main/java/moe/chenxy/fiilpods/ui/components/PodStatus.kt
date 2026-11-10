@@ -54,6 +54,18 @@ fun PodStatus(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (batteryParams.headphones) {
+            // 头戴式：只有一路整体电量，没有左右耳/盒之分。
+            // 用单列 + 居中，避免出现「左 0% / 右 85% / 盒 0%」这种三列假数据。
+            BatteryColumn(
+                label = stringResource(R.string.batt_headphones),
+                pod = batteryParams.left,
+                wearState = null,
+                modifier = Modifier.weight(1f),
+                compact = compact
+            )
+            return@Row
+        }
         BatteryColumn(
             label = stringResource(R.string.batt_left_pod),
             pod = batteryParams.left,

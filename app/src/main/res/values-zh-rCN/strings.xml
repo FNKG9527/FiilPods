@@ -68,6 +68,7 @@
     <string name="pod_case">耳机盒</string>
     <string name="batt_left_pod">左</string>
     <string name="batt_right_pod">右</string>
+    <string name="batt_headphones">头戴</string>
     <string name="waiting_for_pod">等待 OPPO 耳机连接...</string>
     <string name="select_device">选择蓝牙设备</string>
     <string name="no_paired_devices">未找到已配对的设备</string>

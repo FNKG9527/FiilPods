@@ -1763,31 +1763,39 @@ object FiilRfcommController {
         AdaptiveKind.TUNING -> FiilMate.Query.TUNING_STATUS
     }
 
+    /**
+     * 形态切换后把三路电量归一化。
+     *
+     * earType 常常比第一帧电量晚到（型号查询与电量查询是两条命令）：第一帧按双耳
+     * 解析，会把头戴的整体值放进 batteryRight，界面先闪一下「左 0 / 右 85 / 盒 0」。
+     * 识别到头戴后立刻把整体值挪回 batteryLeft，不用等下一次 30 秒心跳。
+     */
+    private fun normalizeBatteryForFormFactor() {
+        if (!FiilModels.isHeadphones(earType)) return
+        if (batteryRight >= 0) batteryLeft = batteryRight
+        batteryRight = -1
+        batteryCase = -1
+    }
+
     private fun applyMateBattery(frame: FiilMate.Frame) {
         // 官方 F045HomeFragment.java:307 把整段 payload 交给 setElectricity()，
         // 后者（:546-551）按 payload[0] / [1] / [2] 分别设置左耳 / 右耳 / 充电盒。
         //
         // ⚠️ v3.3.1 修复：旧实现只取 payload[1]，还把同一个值同时写进左右耳，
         // 于是 (a) 两只耳机电量永远相同，(b) 充电盒电量从不更新（一直是 -1）。
-        val size = frame.payload.size
-        if (size == 0) return
-        fun level(index: Int): Int =
-            if (index < size) frame.byteAt(index, -1).let { if (it == 255) -1 else it } else -1
-
-        val left: Int
-        val right: Int
-        if (size == 1) {
-            // 少数固件只报一个合并值：退化成左右耳同值，而不是丢弃整帧。
-            left = level(0)
-            right = level(0)
-        } else {
-            left = level(0)
-            right = level(1)
-        }
+        // ⚠️ v3.3.2 修复：头戴式（Diva / Wireless / Key Max …）只有**一档整体电量**，
+        // 官方 F046HomeFragment.java:623-625 `setElectricity(buff)` 只读 `buff[1]`
+        // （真机 Key Max 的 payload 是 [0, 85, 0]，前后两个 0 不是左右耳/盒）。
+        // 解析细节放在 [BatteryPayload.parseMate]，由单测钉死。
+        val headphones = FiilModels.isHeadphones(earType)
+        val (left, right, case) = BatteryPayload.parseMate(frame.payload, headphones)
         if (left >= 0) batteryLeft = left
-        if (right >= 0) batteryRight = right
-        if (size >= 3) {
-            val case = level(2)
+        if (headphones) {
+            // 右耳/盒对头戴没有语义，明确置为「未知」，避免 UI/系统再渲染成 0。
+            batteryRight = -1
+            batteryCase = -1
+        } else {
+            if (right >= 0) batteryRight = right
             if (case >= 0) batteryCase = case
         }
         publishState()
@@ -1805,6 +1813,7 @@ object FiilRfcommController {
                     // 下次即使用户把蓝牙名改掉，也能靠地址认出同一只耳机（目标第五阶段）。
                     FiilConfig.writeEarTypeForAddress(appContext, deviceAddress, v)
                 }
+                normalizeBatteryForFormFactor()
                 publishState()
             }
             FiilCommands.GET_ANC,
@@ -1815,9 +1824,17 @@ object FiilRfcommController {
             FiilCommands.GET_MAF_V2 -> handleAnc(frame)
             FiilCommands.GET_BATTERY_LEVEL, FiilCommands.GET_BATTERY_LEVEL_V2 ->
                 FiilGaia.parseBatteryLevel(frame)?.let {
-                    // 老协议回包里 payload[1] 是左右耳的打包位，这里先按单值处理
-                    if (batteryLeft < 0) batteryLeft = it
-                    batteryRight = it
+                    if (FiilModels.isHeadphones(earType)) {
+                        // 头戴只有整体电量；旧实现把它写进 batteryRight，
+                        // 左耳留着上一次的 0，界面同样是「左 0 / 右 85 / 盒 0」。
+                        batteryLeft = it
+                        batteryRight = -1
+                        batteryCase = -1
+                    } else {
+                        // 老协议回包里 payload[1] 是左右耳的打包位，这里先按单值处理
+                        if (batteryLeft < 0) batteryLeft = it
+                        batteryRight = it
+                    }
                     publishState()
                 }
             FiilCommands.GET_BATTERY_OF_BOX ->
@@ -2290,6 +2307,7 @@ object FiilRfcommController {
             FiilGatt.setDialect(FrameDialect.fromMate(isMateDialect))
         }
         Log.i(TAG, "earType override -> $value (effective=$earType mate=$isMateDialect)")
+        normalizeBatteryForFormFactor()
         publishState()
     }
 

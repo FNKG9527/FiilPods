@@ -1247,12 +1247,20 @@ private fun rebuildBatteryFromInts(intent: Intent): BatteryParams? {
         rawStatus = level.coerceAtLeast(0),
     )
     val charging = intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_CHARGING, 0) == 1
-    return BatteryParams(
-        left = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_LEFT, -1), charging),
-        right = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_RIGHT, -1), charging),
-        // 0x0306 是耳机整体充电位，盒电不跟着点亮。
-        case = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_CASE, -1), false),
-    )
+    val headphones = intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_HEADPHONES, 0) == 1
+    val left = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_LEFT, -1), charging)
+    return if (headphones) {
+        // 头戴式只有整体电量：右耳/盒留空，PodStatus 会切成单列。
+        BatteryParams(left = left, right = null, case = null, headphones = true)
+    } else {
+        BatteryParams(
+            left = left,
+            right = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_RIGHT, -1), charging),
+            // 0x0306 是耳机整体充电位，盒电不跟着点亮。
+            case = pod(intent.getIntExtra(OppoCompatBridge.EXTRA_BATTERY_CASE, -1), false),
+            headphones = false,
+        )
+    }
 }
 
 private fun sendBluetoothModuleBroadcast(context: Context, action: String) {

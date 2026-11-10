@@ -20,5 +20,10 @@ data class PodParams (
 data class BatteryParams(
     var left: PodParams? = null,
     var right: PodParams? = null,
-    var case: PodParams? = null
+    var case: PodParams? = null,
+    /**
+     * 头戴式：只有 [left] 这一路整体电量，UI 必须渲染成单列，
+     * 不能套「左耳 / 右耳 / 盒」三列布局。
+     */
+    var headphones: Boolean = false
 ) : Parcelable

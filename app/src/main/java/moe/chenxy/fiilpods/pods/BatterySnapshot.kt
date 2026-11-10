@@ -9,11 +9,13 @@ data class PodBattery(
     val connected: Boolean = false,
 )
 
-/** 三路电量快照。 */
+/** 三路电量快照。头戴式只有 [left] 这一路整体电量。 */
 data class BatterySnapshot(
     val left: PodBattery? = null,
     val right: PodBattery? = null,
     val case: PodBattery? = null,
+    /** 头戴式：UI 只显示一路「整体电量」，不显示左右耳/盒。 */
+    val headphones: Boolean = false,
 ) {
     fun hasAny(): Boolean =
         left?.connected == true || right?.connected == true || case?.connected == true
@@ -37,29 +39,37 @@ data class BatterySnapshot(
             ) {
                 return null
             }
+            val headphones = FiilModels.isHeadphones(
+                intent.getIntExtra(FiilAction.EXTRA_EAR_TYPE, -1)
+            )
             return BatterySnapshot(
                 left = PodBattery(
                     intent.getIntExtra(FiilAction.EXTRA_LEFT_BATTERY, 0),
                     intent.getBooleanExtra(FiilAction.EXTRA_LEFT_CHARGING, false),
                     intent.getBooleanExtra(FiilAction.EXTRA_LEFT_CONNECTED, false),
                 ),
-                right = PodBattery(
+                // 头戴没有右耳/盒：留 null，别让下游把「0%」当成真实读数画出来。
+                right = if (headphones) null else PodBattery(
                     intent.getIntExtra(FiilAction.EXTRA_RIGHT_BATTERY, 0),
                     intent.getBooleanExtra(FiilAction.EXTRA_RIGHT_CHARGING, false),
                     intent.getBooleanExtra(FiilAction.EXTRA_RIGHT_CONNECTED, false),
                 ),
-                case = PodBattery(
+                case = if (headphones) null else PodBattery(
                     intent.getIntExtra(FiilAction.EXTRA_CASE_BATTERY, 0),
                     intent.getBooleanExtra(FiilAction.EXTRA_CASE_CHARGING, false),
                     intent.getBooleanExtra(FiilAction.EXTRA_CASE_CONNECTED, false),
                 ),
+                headphones = headphones,
             )
         }
 
         fun fromStatus(status: FiilStatus): BatterySnapshot = BatterySnapshot(
             left = PodBattery(status.batteryLeft.coerceAtLeast(0), false, status.batteryLeft >= 0),
-            right = PodBattery(status.batteryRight.coerceAtLeast(0), false, status.batteryRight >= 0),
-            case = PodBattery(status.batteryCase.coerceAtLeast(0), false, status.batteryCase >= 0),
+            right = if (status.headphones) null
+            else PodBattery(status.batteryRight.coerceAtLeast(0), false, status.batteryRight >= 0),
+            case = if (status.headphones) null
+            else PodBattery(status.batteryCase.coerceAtLeast(0), false, status.batteryCase >= 0),
+            headphones = status.headphones,
         )
     }
 }
