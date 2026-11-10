@@ -35,6 +35,7 @@ internal fun EarphonesTabPage(
     equalizerVisible: Boolean,
     dualDeviceSupported: Boolean,
     onOpenEqualizer: () -> Unit,
+    onOpenTouchKeys: () -> Unit,
     displayDualDeviceConnection: Boolean,
     onDualDeviceConnectionChange: (Boolean) -> Unit,
     /** 语音提示音量线值 0=高 1=中 2=低 3=静音，-1 表示未知。 */
@@ -107,6 +108,7 @@ internal fun EarphonesTabPage(
                 equalizerVisible = equalizerVisible,
                 dualDeviceSupported = dualDeviceSupported,
                 onOpenEqualizer = onOpenEqualizer,
+                onOpenTouchKeys = onOpenTouchKeys,
                 dualDeviceConnection = displayDualDeviceConnection,
                 onDualDeviceConnectionChange = onDualDeviceConnectionChange,
                 toneVolume = toneVolume,

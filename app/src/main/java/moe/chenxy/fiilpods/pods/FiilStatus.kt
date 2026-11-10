@@ -84,6 +84,21 @@ data class FiilStatus(
      */
     val toneVolume: Int = -1,
     /**
+     * 触控灵敏度档位：0=低、1=中、2=高、-1=未知/不支持。
+     *
+     * 仅 GAIA 协议族有（`FFCOMMAND_Get/SetTouchSensitivity` 1919/1918）；
+     * Mate 机型没有这条命令，UI 必须整块隐藏。
+     */
+    val touchSensitivityLeft: Int = -1,
+    val touchSensitivityRight: Int = -1,
+    /**
+     * 10 个按键（keyId 1..10）当前动作码，下标即 keyId；`[0]` 恒为 -1。
+     *
+     * 只对 Mate 协议族有意义。动作码：0=无操作 2=语音助手 3=上一首 4=下一首
+     * 5=音量加 6=音量减 7=播放/暂停 8=低延时模式。空数组表示还没读到。
+     */
+    val keyActions: IntArray = IntArray(0),
+    /**
      * 耳机侧 LDAC 开关的**真实状态**（cid=39 cmdId=143 回包）。
      *
      * 与 [moe.chenxy.fiilpods.pods.FiilCodec] 那套完全独立：
@@ -166,6 +181,9 @@ data class FiilStatus(
         put("tuning", tuning)
         put("earTypeOverridden", earTypeOverridden)
         put("toneVolume", toneVolume)
+        put("touchSensitivityLeft", touchSensitivityLeft)
+        put("touchSensitivityRight", touchSensitivityRight)
+        put("keyActions", JSONArray().also { arr -> keyActions.forEach { arr.put(it) } })
         put("ldacEnabled", ldacEnabled)
         put("ldacUnlocked", ldacUnlocked)
         put("ldacKnown", ldacKnown)
@@ -209,6 +227,11 @@ data class FiilStatus(
                     tuning = o.optBoolean("tuning", false),
                     earTypeOverridden = o.optBoolean("earTypeOverridden", false),
                     toneVolume = o.optInt("toneVolume", -1),
+                    touchSensitivityLeft = o.optInt("touchSensitivityLeft", -1),
+                    touchSensitivityRight = o.optInt("touchSensitivityRight", -1),
+                    keyActions = o.optJSONArray("keyActions")?.let { arr ->
+                        IntArray(arr.length()) { arr.optInt(it, -1) }
+                    } ?: IntArray(0),
                     ldacEnabled = o.optBoolean("ldacEnabled", false),
                     ldacUnlocked = o.optBoolean("ldacUnlocked", false),
                     ldacKnown = o.optBoolean("ldacKnown", false),

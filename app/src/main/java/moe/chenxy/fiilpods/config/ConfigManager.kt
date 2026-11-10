@@ -6,6 +6,20 @@ import io.github.libxposed.service.XposedService
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+/**
+ * 存在模块本地的 EQ 预设（设备端只有一个自定义槽，无法存多档）。
+ *
+ * [id] 用负数，避免和三方协议里的内置预设索引（0..N）冲突；
+ * 这样 EqualizerPage 里「内置预设」和「我的预设」能同时出现且互不覆盖。
+ */
+@Serializable
+data class SavedEqPreset(
+    val id: Int,
+    val name: String,
+    val frequencies: List<Int> = emptyList(),
+    val gains: List<Int> = emptyList(),
+)
+
 @Serializable
 data class AppConfig(
     val fakeDeviceId: String = ConfigManager.DEFAULT_FAKE_DEVICE_ID,
@@ -17,6 +31,7 @@ data class AppConfig(
     val milinkCardFeatures: Set<Int> = ConfigManager.DEFAULT_MILINK_CARD_FEATURES,
     val autoGameMode: Boolean = false,
     val focusNotification: Boolean = true,
+    val eqPresets: List<SavedEqPreset> = emptyList(),
 )
 
 object ConfigManager {
@@ -145,6 +160,14 @@ object ConfigManager {
 
     fun updateFocusNotification(prefs: SharedPreferences, service: XposedService?, enabled: Boolean) {
         save(prefs, service, current().copy(focusNotification = enabled))
+    }
+
+    /** 本地 EQ 预设库；设备端只存一个自定义槽，多档保存在模块这边。 */
+    fun readSavedEqPresets(prefs: SharedPreferences): List<SavedEqPreset> =
+        readConfig(prefs, "eqPresets").eqPresets
+
+    fun saveSavedEqPresets(prefs: SharedPreferences, presets: List<SavedEqPreset>) {
+        save(prefs, current().copy(eqPresets = presets))
     }
 
     fun save(prefs: SharedPreferences, config: AppConfig) {

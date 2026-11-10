@@ -468,7 +468,16 @@ class MiLinkServiceHook(
      */
     private fun headsetTypeIcon(): Int {
         loadState()
-        return if (FiilModels.isHeadphones(earType)) {
+        // earType 在卡片首次查询时可能还没从蓝牙进程同步过来（ACTION_STATE 晚到）。
+        // 依次回退：已绑定的地址记录 → 蓝牙显示名推断；都拿不到才按普通耳机。
+        val resolved = when {
+            earType > 0 -> earType
+            else -> FiilConfig.readEarTypeForAddress(appContext, currentAddress)
+                .takeIf { it > 0 }
+                ?: FiilModels.earTypeOfName(deviceName).takeIf { it > 0 }
+                ?: -1
+        }
+        return if (FiilModels.isHeadphones(resolved)) {
             HEADSET_TYPE_HEADPHONES
         } else {
             HEADSET_TYPE_NORMAL

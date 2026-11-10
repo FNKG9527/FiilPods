@@ -173,4 +173,27 @@
     <string name="low_latency_music">Music</string>
     <string name="low_latency_game">Game</string>
     <string name="low_latency_video">Video</string>
+
+    <!-- 触控与按键（v3.4.0） -->
+    <string name="touch_keys_title">Touch &amp; keys</string>
+    <string name="touch_keys_summary">Touch sensitivity and button actions</string>
+    <string name="touch_sensitivity">Touch sensitivity</string>
+    <string name="touch_sensitivity_summary">How hard the touch gesture must be</string>
+    <string name="touch_left">Left earbud</string>
+    <string name="touch_right">Right earbud</string>
+    <string name="touch_level_low">Low</string>
+    <string name="touch_level_mid">Medium</string>
+    <string name="touch_level_high">High</string>
+    <string name="key_customization">Button actions</string>
+    <string name="key_slot">Button %1$d</string>
+    <string name="key_config_reading">Reading button settings…</string>
+    <string name="key_action_none">No action</string>
+    <string name="key_action_voice_assistant">Voice assistant</string>
+    <string name="key_action_previous">Previous track</string>
+    <string name="key_action_next">Next track</string>
+    <string name="key_action_volume_up">Volume up</string>
+    <string name="key_action_volume_down">Volume down</string>
+    <string name="key_action_play_pause">Play / pause</string>
+    <string name="key_action_low_latency">Low latency mode</string>
+    <string name="touch_keys_hint">Actions are executed by the earbuds. Some models only expose part of the buttons.</string>
 </resources>

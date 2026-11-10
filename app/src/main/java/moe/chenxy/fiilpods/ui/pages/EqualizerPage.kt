@@ -105,8 +105,10 @@ fun EqualizerPage(
                         enabled = canCreate,
                         onClick = {
                             val frequencies = customEqFrequencies.ifEmpty { EqDefaults.FREQUENCIES }
+                            // 负数 id 表示模块本地预设；内置预设索引是 0..N，不能共用。
+                            val nextLocalId = (customPresets.minOfOrNull { it.id } ?: 0) - 1
                             editor = EqDevicePreset(
-                                id = 0,
+                                id = nextLocalId,
                                 name = "$customPresetName ${customPresets.size + 1}",
                                 frequencies = frequencies,
                                 gains = frequencies.map { 0 },

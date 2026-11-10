@@ -130,6 +130,12 @@ class RemoteLogBridgeTest {
             assertTrue("quiet batch was not retried", delivered.await(2, TimeUnit.SECONDS))
             assertEquals(2, attempts.get())
             assertEquals(1, fallbackCalls.get())
+            // deliver 回调在 send() 内先 countDown，桥接器随后才把批次从 pending 摘掉；
+            // 这里等它落账，避免断言跑在清理之前（整套测试并发时尤其明显）。
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+            while (bridge.pendingCount() != 0 && System.nanoTime() < deadline) {
+                Thread.sleep(5)
+            }
             assertEquals(0, bridge.pendingCount())
         } finally {
             executor.shutdownNow()

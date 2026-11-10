@@ -174,4 +174,27 @@
     <string name="low_latency_music">音乐</string>
     <string name="low_latency_game">游戏</string>
     <string name="low_latency_video">视频</string>
+
+    <!-- 触控与按键（v3.4.0） -->
+    <string name="touch_keys_title">触控与按键</string>
+    <string name="touch_keys_summary">触控灵敏度与按键动作</string>
+    <string name="touch_sensitivity">触控灵敏度</string>
+    <string name="touch_sensitivity_summary">调整触控手势的触发力度</string>
+    <string name="touch_left">左耳</string>
+    <string name="touch_right">右耳</string>
+    <string name="touch_level_low">低</string>
+    <string name="touch_level_mid">中</string>
+    <string name="touch_level_high">高</string>
+    <string name="key_customization">按键自定义</string>
+    <string name="key_slot">按键 %1$d</string>
+    <string name="key_config_reading">正在读取按键设置…</string>
+    <string name="key_action_none">无操作</string>
+    <string name="key_action_voice_assistant">语音助手</string>
+    <string name="key_action_previous">上一首</string>
+    <string name="key_action_next">下一首</string>
+    <string name="key_action_volume_up">音量加</string>
+    <string name="key_action_volume_down">音量减</string>
+    <string name="key_action_play_pause">播放 / 暂停</string>
+    <string name="key_action_low_latency">低延时模式</string>
+    <string name="touch_keys_hint">动作由耳机执行；部分机型只开放其中几个按键。</string>
 </resources>

@@ -768,6 +768,8 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
             addAction(OppoPodsAction.ACTION_AUTO_GAME_MODE_CHANGED)
             addAction(OppoPodsAction.ACTION_DUAL_DEVICE_CONNECTION_SET)
             addAction(OppoPodsAction.ACTION_TONE_VOLUME_SET)
+            addAction(OppoPodsAction.ACTION_TOUCH_SENSITIVITY_SET)
+            addAction(OppoPodsAction.ACTION_KEY_ACTION_SET)
             addAction(OppoPodsAction.ACTION_LOW_LATENCY_MODE_SET)
             addAction(OppoPodsAction.ACTION_CONNECT_POD_REQUEST)
             addAction(OppoPodsAction.ACTION_DISCONNECT_POD_REQUEST)
@@ -959,6 +961,18 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                         }
                         OppoPodsAction.ACTION_TONE_VOLUME_SET -> {
                             FIILProtocol.setToneVolume(intent.getIntExtra("level", 0))
+                        }
+                        OppoPodsAction.ACTION_TOUCH_SENSITIVITY_SET -> {
+                            FiilRfcommController.setTouchSensitivity(
+                                intent.getIntExtra(OppoPodsAction.EXTRA_TOUCH_EAR, 0),
+                                intent.getIntExtra(OppoPodsAction.EXTRA_TOUCH_LEVEL, 0),
+                            )
+                        }
+                        OppoPodsAction.ACTION_KEY_ACTION_SET -> {
+                            FiilRfcommController.setKeyAction(
+                                intent.getIntExtra(OppoPodsAction.EXTRA_KEY_ID, 1),
+                                intent.getIntExtra(OppoPodsAction.EXTRA_KEY_ACTION, 0),
+                            )
                         }
                         OppoPodsAction.ACTION_LOW_LATENCY_MODE_SET -> {
                             // 线值直通：0=音乐 1=游戏 2=视频（cid=37, cmdId=0）

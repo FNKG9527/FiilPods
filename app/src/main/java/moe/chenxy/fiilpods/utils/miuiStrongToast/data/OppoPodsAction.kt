@@ -88,5 +88,19 @@ object OppoPodsAction {
 
     const val EXTRA_LOW_LATENCY_MODE = "mode"
 
+    // ---- 触控灵敏度 / 按键自定义（v3.4.0）----
+    // 触控灵敏度只有 GAIA 有；按键自定义只有 Mate 有（协议层会再判一次方言）。
+    const val ACTION_TOUCH_SENSITIVITY_SET = "chen.action.oppopods.touch_sensitivity_set"
+    const val ACTION_KEY_ACTION_SET = "chen.action.oppopods.key_action_set"
+
+    /** 0=左耳，1=右耳。 */
+    const val EXTRA_TOUCH_EAR = "ear"
+
+    /** 0=低，1=中，2=高。 */
+    const val EXTRA_TOUCH_LEVEL = "level"
+
+    const val EXTRA_KEY_ID = "key_id"
+    const val EXTRA_KEY_ACTION = "action"
+
     const val EXTRA_EQ_ENTRIES_JSON = "eq_entries_json"
 }

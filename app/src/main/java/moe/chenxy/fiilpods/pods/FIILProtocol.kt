@@ -624,6 +624,8 @@ object FIILProtocol {
             requestAdaptiveSwitches()
             // LDAC 耳机侧状态（cid=39 的 143/142）——按机型门控。
             requestLdacState()
+            // 按键动作（cid=39 cmdId=5）——只有 Mate 协议族有。
+            FiilRfcommController.requestKeyConfig()
         } else {
             requestEarType()
             requestBattery()
@@ -635,6 +637,8 @@ object FIILProtocol {
             requestMultipoint()
             requestWearState()
             readEQ()
+            // 触控灵敏度（0x077F）只有 GAIA 协议族有。
+            FiilRfcommController.requestTouchSensitivity()
         }
     }
 

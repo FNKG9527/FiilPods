@@ -45,6 +45,7 @@ import top.yukonga.miuix.kmp.nav.core.NavKey
 import moe.chenxy.fiilpods.FiilPodsApp
 import moe.chenxy.fiilpods.R
 import moe.chenxy.fiilpods.config.ConfigManager
+import moe.chenxy.fiilpods.config.SavedEqPreset
 import moe.chenxy.fiilpods.config.PodImagePrefs
 import moe.chenxy.fiilpods.config.PodImageResource
 import moe.chenxy.fiilpods.pods.NoiseControlMode
@@ -62,6 +63,7 @@ import moe.chenxy.fiilpods.pods.detectDeviceCapabilities
 import moe.chenxy.fiilpods.ui.pages.AboutPage
 import moe.chenxy.fiilpods.ui.pages.EqualizerPage
 import moe.chenxy.fiilpods.ui.pages.RfcommDebugPage
+import moe.chenxy.fiilpods.ui.pages.TouchKeysPage
 import moe.chenxy.fiilpods.ui.pages.ThemeSettingsPage
 import moe.chenxy.fiilpods.utils.RootManager
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.BatteryParams
@@ -99,6 +101,8 @@ sealed interface Screen : NavKey {
     @Serializable
     data object Equalizer : Screen
     @Serializable
+    data object TouchKeys : Screen
+    @Serializable
     data object RfcommDebug : Screen
 }
 
@@ -134,6 +138,13 @@ fun MainUI(
     val toneVolume = remember { mutableStateOf(-1) }
     /** 低延迟档位（FIIL 专有，cid=37 cmd=0，线值 0=音乐 1=游戏 2=视频，-1=未知）。 */
     val lowLatencyMode = remember { mutableStateOf(-1) }
+    /** 触控灵敏度档位（0=低 1=中 2=高，-1=未知；仅 GAIA 协议族）。 */
+    val touchSensitivityLeft = remember { mutableStateOf(-1) }
+    val touchSensitivityRight = remember { mutableStateOf(-1) }
+    /** 10 个按键的动作码，下标即 keyId；空数组=未读到（仅 Mate 协议族）。 */
+    val keyActions = remember { mutableStateOf(IntArray(0)) }
+    /** 当前链路是否 Mate 协议族（决定触控灵敏度 / 按键自定义哪一块可见）。 */
+    val isMateDialect = remember { mutableStateOf(false) }
     /**
      * LDAC 开关状态：`-1` 还没读到（开关仍显示，初值当关）、`0` 关、`1` 开。
      *
@@ -194,6 +205,9 @@ fun MainUI(
     val spatialAudioMode = remember { mutableStateOf(prefs.getInt("spatial_audio_mode", ConfigManager.SPATIAL_AUDIO_OFF)) }
     val eqPreset = remember { mutableStateOf(-1) }
     val eqDevicePresets = remember { mutableStateOf<List<EqDevicePreset>>(emptyList()) }
+    val eqLocalPresets = remember { mutableStateOf(appConfig.eqPresets) }
+    /** 正在应用的本地预设 id；0 表示当前是设备/内置档。 */
+    val eqActiveLocalId = remember { mutableStateOf(0) }
     val earphonePrefs = remember { mutableStateOf(PodImagePrefs.load(prefs)) }
     val productId = remember { mutableStateOf<String?>(null) }
     /**
@@ -500,10 +514,14 @@ fun MainUI(
                             connectedEarType.intValue = status.earType
                         }
                         ancModeFromWire(status.isMate, status.ancMode)?.let { ancMode.value = it }
+                        isMateDialect.value = status.isMate
                         lowLatencyMode.value = status.lowLatencyLevel
                         spatialAudioMode.value = if (status.cinemaMode) 1 else 0
                         dualDeviceConnection.value = status.multipoint
                         if (status.toneVolume >= 0) toneVolume.value = status.toneVolume
+                        touchSensitivityLeft.value = status.touchSensitivityLeft
+                        touchSensitivityRight.value = status.touchSensitivityRight
+                        if (status.keyActions.isNotEmpty()) keyActions.value = status.keyActions
                     }
 
                     FiilAction.ACTION_OP_FAILED -> {
@@ -674,6 +692,7 @@ fun MainUI(
     }
 
     fun setEqPreset(preset: Int) {
+        eqActiveLocalId.value = 0
         eqPreset.value = preset
         Intent(OppoPodsAction.ACTION_EQ_PRESET_SET).apply {
             this.putExtra("preset", preset)
@@ -681,6 +700,35 @@ fun MainUI(
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             context.sendBroadcast(this)
         }
+    }
+
+    /** 把一条本地预设写入设备自定义槽（设备端只有这一档，多档存在模块本地）。 */
+    fun applyLocalEqPreset(preset: SavedEqPreset) {
+        eqActiveLocalId.value = preset.id
+        Intent(OppoPodsAction.ACTION_EQ_PRESET_SAVE).apply {
+            putExtra("id", preset.id)
+            putExtra("name", preset.name)
+            putIntegerArrayListExtra("frequencies", ArrayList(preset.frequencies))
+            putIntegerArrayListExtra("gains", ArrayList(preset.gains))
+            putExtra("min_value", -6)
+            putExtra("max_value", 6)
+            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            context.sendBroadcast(this)
+        }
+    }
+
+    fun selectEqPreset(id: Int) {
+        if (id < 0) {
+            eqLocalPresets.value.firstOrNull { it.id == id }?.let(::applyLocalEqPreset)
+        } else {
+            setEqPreset(id)
+        }
+    }
+
+    fun persistEqPresets(list: List<SavedEqPreset>) {
+        eqLocalPresets.value = list
+        ConfigManager.saveSavedEqPresets(prefs, list)
     }
 
     fun saveEqPreset(
@@ -691,8 +739,19 @@ fun MainUI(
         minValue: Int,
         maxValue: Int,
     ) {
+        val existing = eqLocalPresets.value.firstOrNull { it.id == id }
+        val targetId = existing?.id ?: ((eqLocalPresets.value.minOfOrNull { it.id } ?: 0) - 1)
+        val updated = if (existing != null) {
+            eqLocalPresets.value.map {
+                if (it.id == id) SavedEqPreset(targetId, name, frequencies, gains) else it
+            }
+        } else {
+            eqLocalPresets.value + SavedEqPreset(targetId, name, frequencies, gains)
+        }
+        persistEqPresets(updated)
+        eqActiveLocalId.value = targetId
         Intent(OppoPodsAction.ACTION_EQ_PRESET_SAVE).apply {
-            putExtra("id", id)
+            putExtra("id", targetId)
             putExtra("name", name)
             putIntegerArrayListExtra("frequencies", ArrayList(frequencies))
             putIntegerArrayListExtra("gains", ArrayList(gains))
@@ -705,6 +764,23 @@ fun MainUI(
     }
 
     fun deleteEqPreset(entry: EqDevicePreset) {
+        if (entry.id < 0) {
+            persistEqPresets(eqLocalPresets.value.filterNot { it.id == entry.id })
+            if (eqActiveLocalId.value == entry.id) {
+                eqActiveLocalId.value = 0
+                // 删除正在用的本地预设 → 让设备回到平直曲线。
+                Intent(OppoPodsAction.ACTION_EQ_PRESET_DELETE).apply {
+                    putExtra(
+                        OppoPodsAction.EXTRA_EQ_ENTRIES_JSON,
+                        Json.encodeToString(ListSerializer(EqDevicePreset.serializer()), listOf(entry)),
+                    )
+                    setPackage("com.android.bluetooth")
+                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                    context.sendBroadcast(this)
+                }
+            }
+            return
+        }
         Intent(OppoPodsAction.ACTION_EQ_PRESET_DELETE).apply {
             putExtra(
                 OppoPodsAction.EXTRA_EQ_ENTRIES_JSON,
@@ -730,6 +806,32 @@ fun MainUI(
         toneVolume.value = level
         Intent(OppoPodsAction.ACTION_TONE_VOLUME_SET).apply {
             this.putExtra("level", level)
+            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            context.sendBroadcast(this)
+        }
+    }
+
+    /** 触控灵敏度（仅 GAIA）：ear 0=左 1=右，level 0=低 1=中 2=高。 */
+    fun setTouchSensitivity(ear: Int, level: Int) {
+        if (ear == 0) touchSensitivityLeft.value = level else touchSensitivityRight.value = level
+        Intent(OppoPodsAction.ACTION_TOUCH_SENSITIVITY_SET).apply {
+            putExtra(OppoPodsAction.EXTRA_TOUCH_EAR, ear)
+            putExtra(OppoPodsAction.EXTRA_TOUCH_LEVEL, level)
+            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            context.sendBroadcast(this)
+        }
+    }
+
+    /** 按键动作（仅 Mate）：keyId 1..10，action 见 FiilStatus.keyActions。 */
+    fun setKeyAction(keyId: Int, action: Int) {
+        val updated = if (keyActions.value.size >= 11) keyActions.value.copyOf() else IntArray(11) { -1 }
+        if (keyId in 1..10) updated[keyId] = action
+        keyActions.value = updated
+        Intent(OppoPodsAction.ACTION_KEY_ACTION_SET).apply {
+            putExtra(OppoPodsAction.EXTRA_KEY_ID, keyId)
+            putExtra(OppoPodsAction.EXTRA_KEY_ACTION, action)
             setPackage("com.android.bluetooth")
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             context.sendBroadcast(this)
@@ -926,6 +1028,7 @@ fun MainUI(
                     displayCapabilities.customEqSupported,
                 dualDeviceSupported = displayCapabilities.dualDeviceSupported,
                 onOpenEqualizer = { backStack.add(Screen.Equalizer) },
+                onOpenTouchKeys = { backStack.add(Screen.TouchKeys) },
                 displayDualDeviceConnection = displayDualDeviceConnection,
                 onDualDeviceConnectionChange = { setDualDeviceConnection(it) },
                 toneVolume = toneVolume.value,
@@ -1138,14 +1241,56 @@ fun MainUI(
                         bottom = pageBottomContentPadding,
                     ),
                     builtInPresets = displayCapabilities.eqPresets,
-                    devicePresets = eqDevicePresets.value,
-                    selectedId = eqPreset.value,
+                    devicePresets = eqDevicePresets.value + eqLocalPresets.value.map {
+                        EqDevicePreset(
+                            id = it.id,
+                            name = it.name,
+                            frequencies = it.frequencies,
+                            gains = it.gains,
+                        )
+                    },
+                    selectedId = if (eqActiveLocalId.value != 0) eqActiveLocalId.value else eqPreset.value,
                     customEqSupported = displayCapabilities.customEqSupported,
                     customEqFrequencies = displayCapabilities.customEqFrequencies,
-                    customEqMaxPresets = displayCapabilities.customEqMaxPresets,
-                    onSelectPreset = ::setEqPreset,
+                    customEqMaxPresets = 0,
+                    onSelectPreset = ::selectEqPreset,
                     onSavePreset = ::saveEqPreset,
                     onDeletePreset = ::deleteEqPreset,
+                )
+            }
+        }
+        entry<Screen.TouchKeys> {
+            val touchKeysScrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = stringResource(R.string.touch_keys_title),
+                        largeTitle = stringResource(R.string.touch_keys_title),
+                        scrollBehavior = touchKeysScrollBehavior,
+                        navigationIcon = {
+                            IconButton(onClick = { backStack.removeLast() }) {
+                                Icon(imageVector = MiuixIcons.Back, contentDescription = "Back")
+                            }
+                        },
+                    )
+                },
+            ) { padding ->
+                TouchKeysPage(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(backgroundColor)
+                        .overScrollVertical()
+                        .nestedScroll(touchKeysScrollBehavior.nestedScrollConnection),
+                    contentPadding = PaddingValues(
+                        top = padding.calculateTopPadding(),
+                        bottom = pageBottomContentPadding,
+                    ),
+                    isMate = isMateDialect.value,
+                    touchLeft = touchSensitivityLeft.value,
+                    touchRight = touchSensitivityRight.value,
+                    keyActions = keyActions.value.toList(),
+                    onTouchSensitivityChange = ::setTouchSensitivity,
+                    onKeyActionChange = ::setKeyAction,
                 )
             }
         }

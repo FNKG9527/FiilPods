@@ -66,8 +66,8 @@ android {
         //   （20 行或 1 秒一次），比广播可靠——广播只有在 UI 进程活着时才有人接，
         //   用户没打开 App 的那段时间日志会静默丢掉。
         //   导出内容：最近 60 分钟 + 崩溃记录 + 当前设置，上限 2 MiB，txt，可分享。
-        versionCode = 13
-        versionName = "3.3.2"
+        versionCode = 14
+        versionName = "3.4.0"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 

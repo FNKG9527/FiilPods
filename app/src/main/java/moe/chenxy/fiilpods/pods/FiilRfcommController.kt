@@ -411,6 +411,31 @@ object FiilRfcommController {
         private set
 
     /**
+     * 触控灵敏度档位：0=低、1=中、2=高，-1=未知/不支持。
+     *
+     * 仅 GAIA 协议族有（`FFCOMMAND_Get/SetTouchSensitivity` 1919/1918）；
+     * Mate（F045~F053）在官方 APP 里没有对应命令，UI 必须整块隐藏。
+     */
+    @Volatile
+    var touchSensitivityLeft: Int = -1
+        private set
+
+    @Volatile
+    var touchSensitivityRight: Int = -1
+        private set
+
+    /**
+     * 10 个按键的动作码，下标即 keyId（1..10），`[0]` 恒为 -1。
+     *
+     * 只对 Mate 协议族有意义；空数组表示还没读到。
+     * 动作码：0=无操作 2=语音助手 3=上一首 4=下一首 5=音量加 6=音量减
+     * 7=播放/暂停 8=低延时模式。
+     */
+    @Volatile
+    var keyActions: IntArray = IntArray(0)
+        private set
+
+    /**
      * 耳机侧 LDAC 开关的真实状态（cid=39 cmdId=143 回包 payload[0]==1）。
      *
      * ⚠ 与 [moe.chenxy.fiilpods.pods.FiilCodec] 的 A2DP 视角**不是一回事**：
@@ -1206,6 +1231,9 @@ object FiilRfcommController {
         wearLeft = false
         wearRight = false
         wearKnown = false
+        touchSensitivityLeft = -1
+        touchSensitivityRight = -1
+        keyActions = IntArray(0)
         eqIndex = -1
         is3D = false
         lowLatencyLevel = 0
@@ -1440,6 +1468,15 @@ object FiilRfcommController {
                     if (v in 0..3) {
                         toneVolume = v
                         ackOp(KEY_TONE)
+                        publishState()
+                    }
+                }
+                // 按键配置（cid=39 cmdId=5）：回包首字节 0x1E(=30) 是后面字节数，
+                // 再按 10 组 × 3 字节（keyId, type, value）排；PC 实测首组是 `01 01 07`。
+                // 有些固件省略计数位，所以两种布局都接受。
+                FiilMate.Query.KEY -> {
+                    TouchKeyPayload.parseKeyActions(frame.payload)?.let {
+                        keyActions = it
                         publishState()
                     }
                 }
@@ -1866,6 +1903,15 @@ object FiilRfcommController {
                 ackOp(KEY_MULTIPOINT)
                 publishState()
             }
+            FiilCommands.GET_TOUCH_SENSITIVITY -> {
+                // 官方 GaiaSdkCommand.analysisGetTouchSensitivity：payload[1]=右耳、payload[2]=左耳，
+                // 返回 int[]{left, right}。官方把长度判断写成 `< 2`（bug），这里按实际 3 字节收。
+                TouchKeyPayload.parseSensitivity(frame.payload)?.let { (left, right) ->
+                    touchSensitivityLeft = left
+                    touchSensitivityRight = right
+                    publishState()
+                }
+            }
             FiilCommands.GET_EQ, FiilCommands.GET_EQ_V2, FiilCommands.SET_EQ, FiilCommands.SET_EQ_V2 -> {
                 // 回包与 Mate 同构：[预留][档位][b0..bn]（官方 F046 s0() 把读到的
                 // 整块 buffer 原样回写，[0] 是保留位、[1] 才是档位）。
@@ -2203,6 +2249,64 @@ object FiilRfcommController {
     /** 兼容旧调用方：Boolean 形态，true 等同游戏档(1)。 */
     fun setLowLatency(on: Boolean) = setLowLatencyLevel(if (on) 1 else 0)
 
+    /**
+     * 写入触控灵敏度（仅 GAIA）。
+     *
+     * 官方 `FiilCommandUtil.setTouchSensitivity(int)` @:1274-1292 的 6 档编码：
+     * 左耳低/中/高 = `{1,44}/{1,37}/{1,73}`，右耳低/中/高 = `{0,44}/{0,37}/{0,73}`。
+     * 第一个字节 1=左、0=右；第二个字节才是档位。
+     *
+     * @param ear 0=左耳，1=右耳（与 UI 一致）
+     * @param level 0=低，1=中，2=高
+     */
+    fun setTouchSensitivity(ear: Int, level: Int) {
+        if (isMateDialect) {
+            RfcommLog.w(appContext, TAG, "setTouchSensitivity ignored: Mate 方言没有触控灵敏度命令")
+            return
+        }
+        if (ear !in 0..1 || level !in 0..2) return
+        if (ear == 0) touchSensitivityLeft = level else touchSensitivityRight = level
+        RfcommLog.i(appContext, TAG, "setTouchSensitivity ear=$ear level=$level")
+        send(
+            FiilCommands.SET_TOUCH_SENSITIVITY,
+            TouchKeyPayload.sensitivityPayload(ear, level),
+            newProtocol = false,
+        )
+        publishState()
+    }
+
+    /** 查询左右耳触控灵敏度（仅 GAIA）。 */
+    fun requestTouchSensitivity() {
+        if (isMateDialect) return
+        send(FiilCommands.GET_TOUCH_SENSITIVITY, ByteArray(0), newProtocol = false)
+    }
+
+    /**
+     * 写入一个按键的动作（仅 Mate）。
+     *
+     * 官方 `c.java:354-365`：cid=34、cmdId=keyId、payload 单字节动作码。
+     * 动作码白名单来自 `F45SelectOperateDialog` 与 `arrays.xml:221`。
+     */
+    fun setKeyAction(keyId: Int, action: Int) {
+        if (!isMateDialect) {
+            RfcommLog.w(appContext, TAG, "setKeyAction ignored: 按键自定义只在 Mate 协议族可用")
+            return
+        }
+        if (keyId !in 1..10 || action !in KEY_ACTION_CODES) return
+        val copy = if (keyActions.size >= 11) keyActions.copyOf() else IntArray(11) { -1 }
+        copy[keyId] = action
+        keyActions = copy
+        RfcommLog.i(appContext, TAG, "setKeyAction key=$keyId action=$action")
+        sendMate(FiilMate.Cid.SET_KEY, keyId, byteArrayOf(action.toByte()))
+        publishState()
+    }
+
+    /** 查询 10 个按键的当前动作（仅 Mate，cid=39 cmdId=5）。 */
+    fun requestKeyConfig() {
+        if (!isMateDialect) return
+        sendMate(FiilMate.Cid.QUERY, FiilMate.Query.KEY, ByteArray(0))
+    }
+
     /** 音量 ±1 级。 */
     /**
      * 音量加 / 减。
@@ -2343,6 +2447,9 @@ object FiilRfcommController {
         tuning = tuning,
         earTypeOverridden = earTypeOverridden,
         toneVolume = toneVolume,
+        touchSensitivityLeft = touchSensitivityLeft,
+        touchSensitivityRight = touchSensitivityRight,
+        keyActions = keyActions,
         ldacEnabled = ldacEnabled,
         ldacUnlocked = ldacUnlocked,
         ldacKnown = ldacKnown,
@@ -2430,6 +2537,12 @@ object FiilRfcommController {
 
     // 待确认操作的键。GAIA 与 Mate 用不同键，避免两套命令空间串号。
     private const val KEY_ANC = "anc"
+    /** 触控灵敏度线值：低/中/高（官方 setTouchSensitivity 的 44/37/73）。 */
+    private val TOUCH_LEVEL_BYTES = TouchKeyPayload.LEVEL_BYTES
+
+    /** 官方 F45SelectOperateDialog / arrays.xml:221 允许的按键动作码。 */
+    private val KEY_ACTION_CODES = TouchKeyPayload.ACTION_CODES
+
     private const val KEY_EQ = "eq"
     private const val KEY_3D = "3d"
     private const val KEY_LOW_LATENCY = "low_latency"

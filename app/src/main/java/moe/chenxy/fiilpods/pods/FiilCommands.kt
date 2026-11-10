@@ -37,7 +37,18 @@ object FiilCommands {
     const val SET_VOLUME = 262             // 0x0106
     const val UP_VOLUME = 517              // 0x0205
     const val DOWN_VOLUME = 518            // 0x0206
-    const val SET_SEARCH = 265             // 0x0109 寻找耳机
+    const val SET_SEARCH = 265
+
+    /**
+     * 触控灵敏度（官方 `FFCOMMAND_GetTouchSensitivity` / `FFCOMMAND_SetTouchSensitivity`）。
+     *
+     * 仅 GAIA 协议族有；Mate（F045~F053）没有对应命令。
+     * 写：payload `[1, 档位字节]` 表示左耳，`[0, 档位字节]` 表示右耳；
+     * 档位字节 高=73(0x49) 中=37(0x25) 低=44(0x2C)。
+     * 读：回包 payload `[保留, 右耳档位, 左耳档位]`。
+     */
+    const val GET_TOUCH_SENSITIVITY = 1919
+    const val SET_TOUCH_SENSITIVITY = 1918             // 0x0109 寻找耳机
     const val SET_TIME = 4104              // 0x1008
     const val SET_LANGUAGE = 260           // 0x0104
     const val SET_BRIGHT = 261             // 0x0105

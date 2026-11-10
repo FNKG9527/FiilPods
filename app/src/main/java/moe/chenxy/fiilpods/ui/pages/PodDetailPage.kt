@@ -85,6 +85,7 @@ fun PodDetailPage(
     equalizerVisible: Boolean = false,
     dualDeviceSupported: Boolean = false,
     onOpenEqualizer: () -> Unit = {},
+    onOpenTouchKeys: () -> Unit = {},
     boxImagePath: String? = null,
     /**
      * 当前耳机的 earType（`-1` = 未知）。
@@ -164,6 +165,7 @@ fun PodDetailPage(
                     equalizerVisible = equalizerVisible,
                     dualDeviceSupported = dualDeviceSupported,
                     onOpenEqualizer = onOpenEqualizer,
+                    onOpenTouchKeys = onOpenTouchKeys,
                     bottomContentPadding = bottomContentPadding
                 )
             }
@@ -217,6 +219,7 @@ fun PodDetailPage(
             equalizerVisible = equalizerVisible,
             dualDeviceSupported = dualDeviceSupported,
             onOpenEqualizer = onOpenEqualizer,
+            onOpenTouchKeys = onOpenTouchKeys,
             bottomContentPadding = bottomContentPadding
         )
     }
@@ -271,6 +274,7 @@ private fun LazyListScope.podControlItems(
     equalizerVisible: Boolean,
     dualDeviceSupported: Boolean,
     onOpenEqualizer: () -> Unit,
+    onOpenTouchKeys: () -> Unit,
     bottomContentPadding: Dp
 ) {
     val spatialAudioValues = listOf(
@@ -355,6 +359,17 @@ private fun LazyListScope.podControlItems(
                     },
                 )
             }
+            BasicComponent(
+                title = stringResource(R.string.touch_keys_title),
+                summary = stringResource(R.string.touch_keys_summary),
+                onClick = onOpenTouchKeys,
+                endActions = {
+                    Icon(
+                        imageVector = MiuixIcons.Basic.ArrowRight,
+                        contentDescription = null,
+                    )
+                },
+            )
             if (toneVolume >= 0) {
                 // 线值 0=高 1=中 2=低 3=静音（与直觉相反，0 最响）。
                 val toneOptions = listOf(

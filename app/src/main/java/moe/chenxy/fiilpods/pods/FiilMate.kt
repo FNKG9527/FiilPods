@@ -212,6 +212,14 @@ object FiilMate {
         /** EQ 写入，buffer=10 字节频段增益 —— c.java:338 setEQ */
         const val SET_EQ = 32
 
+        /**
+         * 按键动作写入（官方 `com/fengeek/main/i/d/c.java:354-365`）。
+         *
+         * `setCommandClassifyId(34)` + `setCommandId(keyId)` + `setBuffer(byteArrayOf(value))`。
+         * 只存在于 Mate 协议族；GAIA 机型没有按键自定义。
+         */
+        const val SET_KEY = 34
+
         /** 媒体播放控制 —— c.java:420 setMusicStatus */
         const val SET_MUSIC = 33
 
