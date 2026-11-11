@@ -66,15 +66,8 @@ android {
         //   （20 行或 1 秒一次），比广播可靠——广播只有在 UI 进程活着时才有人接，
         //   用户没打开 App 的那段时间日志会静默丢掉。
         //   导出内容：最近 60 分钟 + 崩溃记录 + 当前设置，上限 2 MiB，txt，可分享。
-        // v3.4.3：LDAC 解锁链路的真机实测结论落地。
-        //   ① 详情页 LDAC 开关不再要求 `ldacUnlocked` —— 实测 142（授权）与
-        //      143（开关）是两条独立路径，142=00 时开关照样能开、codec 照样变 LDAC。
-        //      原先的门禁等于替已经下线的官方服务器继续锁用户。
-        //   ② 详情页新增「写入 LDAC 授权码」入口（仅 F046/F048 两族），
-        //      把以前只存在于协议层的 setActivationLdac 做成可操作 UI。
-        //   ③ 相关实测证据：fiil-ldac-unlock v1.1.0 / docs/PROTOCOL.md 第 7.1、7.2、11 章。
-        versionCode = 17
-        versionName = "3.4.3"
+        versionCode = 16
+        versionName = "3.4.2"
         buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 

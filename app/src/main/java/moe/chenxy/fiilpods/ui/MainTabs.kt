@@ -112,8 +112,6 @@ internal fun MainTabsScaffold(
     ldacKnown: Boolean,
     /** 耳机侧 LDAC 是否已解锁授权。 */
     ldacUnlocked: Boolean,
-    /** 用户点了「写入授权码」（只有 F046/F048 有入口，其余传 null）。 */
-    onWriteLicense: (() -> Unit)?,
     onToneVolumeChange: (Int) -> Unit,
     onLowLatencyModeChange: (Int) -> Unit,
     onLdacChange: (Boolean) -> Unit,
@@ -273,7 +271,6 @@ internal fun MainTabsScaffold(
                         ldacSupported = ldacSupported,
                         ldacKnown = ldacKnown,
                         ldacUnlocked = ldacUnlocked,
-                        onWriteLicense = onWriteLicense,
                         onToneVolumeChange = onToneVolumeChange,
                         onLowLatencyModeChange = onLowLatencyModeChange,
                         onLdacChange = onLdacChange,
@@ -460,8 +457,6 @@ private fun EarphonesTabShell(
     ldacKnown: Boolean,
     /** 耳机侧 LDAC 是否已解锁授权。 */
     ldacUnlocked: Boolean,
-    /** 用户点了「写入授权码」（只有 F046/F048 有入口，其余传 null）。 */
-    onWriteLicense: (() -> Unit)?,
     onToneVolumeChange: (Int) -> Unit,
     onLowLatencyModeChange: (Int) -> Unit,
     onLdacChange: (Boolean) -> Unit,
@@ -539,7 +534,6 @@ private fun EarphonesTabShell(
             ldacSupported = ldacSupported,
             ldacKnown = ldacKnown,
             ldacUnlocked = ldacUnlocked,
-            onWriteLicense = onWriteLicense,
             onToneVolumeChange = onToneVolumeChange,
             onLowLatencyModeChange = onLowLatencyModeChange,
             onLdacChange = onLdacChange,

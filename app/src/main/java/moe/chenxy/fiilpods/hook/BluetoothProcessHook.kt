@@ -749,8 +749,6 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
             addAction(FiilAction.ACTION_PODS_UI_INIT)
             addAction(FiilAction.ACTION_REFRESH_STATUS)
             addAction(FiilAction.ACTION_COMMAND)
-            addAction(FiilAction.ACTION_WRITE_LDAC_LICENSE)
-            addAction(FiilAction.ACTION_CLEAR_LDAC_LICENSE)
             addAction(FiilAction.ACTION_ANC_SELECT)
             addAction(FiilAction.ACTION_CONFIG_CHANGED)
             // ---- OppoPods 兼容契约 ----
@@ -896,34 +894,6 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                         }
                         OppoPodsAction.ACTION_PODS_UI_CLOSED -> Unit
                         FiilAction.ACTION_COMMAND -> handleCommand(intent)
-                        FiilAction.ACTION_WRITE_LDAC_LICENSE -> {
-                            val hex = intent.getStringExtra(FiilAction.EXTRA_LICENSE_HEX).orEmpty()
-                            runCatching {
-                                val blocks = FiilMate.License.parseActivateCode(hex)
-                                val sent = FIILProtocol.writeLdacLicense(blocks)
-                                logI("ldac license write: blocks=${blocks.size} frames=$sent")
-                                if (sent == 0) {
-                                    logW("ldac license write skipped: earType=${FiilRfcommController.earType}")
-                                }
-                            }.onFailure {
-                                logW("ldac license write failed: ${it.message}")
-                            }
-                            // 无论成功与否都要回读一次：ACK 不代表被接受，142 才是判据。
-                            runCatching { FIILProtocol.requestLdacState() }
-                                .onFailure { logW("ldac license verify query skipped", it) }
-                            publishNow(hostContext)
-                        }
-                        FiilAction.ACTION_CLEAR_LDAC_LICENSE -> {
-                            runCatching {
-                                val sent = FIILProtocol.clearLdacLicense()
-                                logI("ldac license clear: frames=$sent")
-                            }.onFailure {
-                                logW("ldac license clear failed: ${it.message}")
-                            }
-                            runCatching { FIILProtocol.requestLdacState() }
-                                .onFailure { logW("ldac license verify query skipped", it) }
-                            publishNow(hostContext)
-                        }
                         FiilAction.ACTION_ANC_SELECT -> {
                             FiilRfcommController.setAnc(intent.getIntExtra(FiilAction.EXTRA_STATUS, 0))
                         }

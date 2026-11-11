@@ -248,21 +248,6 @@ object FiilModels {
     /** 该机型是否支持耳机侧的 LDAC 开关（cid=1 cmd=13 / cid=39 cmd=143）。 */
     fun supportsLdac(earType: Int): Boolean = earType in LDAC_EAR_TYPES
 
-    /**
-     * 该机型的协议栈里**是否存在** `setActivationLdac`（即能否写授权码）。
-     *
-     * ⚠ 这是与 [supportsLdac] **不同**的一组：
-     *  · 开关能开（[supportsLdac]）不代表能写授权码；
-     *  · 七个机型族的 `com/fengeek/main/i/d/` 目录下，只有 `c.java`（F046）与
-     *    `e.java`（F048）有 `setActivationLdac`，b/d/f/g/h 五个类**根本没有这个方法**。
-     *
-     * 逆向依据：`c.java:287-302`、`e.java:442-457`。
-     */
-    private val LICENSE_EAR_TYPES: Set<Int> = setOf(46, 48)
-
-    /** 该机型是否支持写 LDAC 授权码（cid=1 cmdId=12）。 */
-    fun supportsLdacLicense(earType: Int): Boolean = earType in LICENSE_EAR_TYPES
-
     // ------------------------------------------------------------------
     // 自适应开关（与 MAF 档位并列的独立开关，不是 MAF 的第 5 档）
     // ------------------------------------------------------------------

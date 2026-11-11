@@ -48,28 +48,6 @@ object FiilAction {
     /** 通用命令通道（模块 UI → 蓝牙进程）。extras: cmd, value, flag */
     const val ACTION_COMMAND = "io.github.fnkg9527.fiilpods.action.COMMAND"
 
-    /**
-     * 写 LDAC 授权码（模块 UI → 蓝牙进程）。extras: [EXTRA_LICENSE_HEX]
-     *
-     * 单独立一条 action（而不是塞进 [ACTION_COMMAND]）的原因：
-     *  · 载荷是**变长文本**，不是 `Int value` / `Boolean flag`；
-     *  · 这条命令有**破坏性**（写错会清掉耳机已有解锁状态），
-     *    单独命名便于在广播日志里一眼认出，也便于将来单独加二次确认。
-     *
-     * ⚠ 写入后**必须**回读 `142`（cid=39 cmdId=142）才算成功 ——
-     * 命令的 ACK 只表示「收到」，固件会校验内容并可能静默拒绝。
-     */
-    const val ACTION_WRITE_LDAC_LICENSE =
-        "io.github.fnkg9527.fiilpods.action.WRITE_LDAC_LICENSE"
-
-    /**
-     * 清除 LDAC 授权码（写 17 个 0，即官方的「取消激活」原语）。
-     *
-     * ⚠ 破坏性：会清掉耳机已有的解锁状态。`F046HomeFragment.java:94-95`。
-     */
-    const val ACTION_CLEAR_LDAC_LICENSE =
-        "io.github.fnkg9527.fiilpods.action.CLEAR_LDAC_LICENSE"
-
     /** 请求当前状态快照。 */
     const val ACTION_REQUEST_STATE = "io.github.fnkg9527.fiilpods.action.REQUEST_STATE"
 
@@ -110,15 +88,6 @@ object FiilAction {
 
     /** 低延迟档位（Int：0 音乐 / 1 游戏 / 2 视频）。 */
     const val EXTRA_LOW_LATENCY_MODE = "low_latency_mode"
-
-    /**
-     * LDAC 授权码的 hex 文本（String）。
-     *
-     * 接受两种形态（同官方 App，见 [FiilMate.License.parseActivateCode]）：
-     *  · `"<32hex>"` 单耳（F046 就是这种）
-     *  · `"<左32hex>,<右32hex>"` 双耳
-     */
-    const val EXTRA_LICENSE_HEX = "license_hex"
 
     /** 影院（空间音频）开关。 */
     const val EXTRA_CINEMA = "cinema"

@@ -55,8 +55,6 @@ internal fun EarphonesTabPage(
     ldacKnown: Boolean = false,
     /** 耳机侧 LDAC 是否已解锁授权。 */
     ldacUnlocked: Boolean = false,
-    /** 用户点了「写入授权码」（只有 F046/F048 有入口，其余传 null）。 */
-    onWriteLicense: (() -> Unit)? = null,
     onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
@@ -119,7 +117,6 @@ internal fun EarphonesTabPage(
                 ldacSupported = ldacSupported,
                 ldacKnown = ldacKnown,
                 ldacUnlocked = ldacUnlocked,
-                onWriteLicense = onWriteLicense,
                 onLdacChange = onLdacChange,
                 onToneVolumeChange = onToneVolumeChange,
                 onLowLatencyModeChange = onLowLatencyModeChange,

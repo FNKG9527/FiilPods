@@ -181,16 +181,7 @@ internal object SettingsControlCard {
             val ldacSupported = earType > 0 && FiilModels.supportsLdac(earType)
             holder.ldacRow.visibility = if (ldacSupported) View.VISIBLE else View.GONE
             holder.ldacSwitch.isChecked = s.ldacEnabled
-            // ⚠ v3.4.3：不再把 ldacUnlocked 当开关的使能条件。
-            //
-            // 旧逻辑 `&& s.ldacUnlocked` 隐含「没授权就打不开 LDAC」，但真机实测
-            // （FIIL Key Max / F046 / 固件 3.0.1.1）证明 142（授权）与 143（开关）
-            // 是两条独立路径：142=00 时 setLdacSwitch(1) 依然回 ACK 成功，
-            // 143 翻 1、144 读回 02（LDAC 实际生效）。
-            //
-            // 授权只影响**官方 App 的 UI 是否放行**那个开关，不是固件的前置条件。
-            // 保留这个门禁等于替已故的官方服务器继续锁用户。
-            holder.ldacSwitch.isEnabled = s.connected && ldacSupported
+            holder.ldacSwitch.isEnabled = s.connected && ldacSupported && s.ldacUnlocked
 
             holder.adaptiveControls.forEach { control ->
                 val supported = supportsAdaptive(control.kind, earType)
