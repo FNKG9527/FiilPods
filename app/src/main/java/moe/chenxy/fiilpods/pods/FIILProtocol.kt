@@ -751,6 +751,9 @@ object FIILProtocol {
         requestAdaptiveSwitches()
         // LDAC 耳机侧状态（cid=39 的 143/142）——按机型门控，不支持的机型直接跳过。
         requestLdacState()
+        // 按键配置（cid=39 cmdId=5）。以前只有 refreshAll() 会发，而握手走的是这里，
+        // 于是「连上就进页面」的常规路径从来没查过按键，UI 永远停在「读取中」。
+        FiilRfcommController.requestKeyConfig()
     }
 }
 

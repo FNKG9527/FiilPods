@@ -188,6 +188,8 @@
     <string name="key_customization">按键自定义</string>
     <string name="key_slot">按键 %1$d</string>
     <string name="key_config_reading">正在读取按键设置…</string>
+    <string name="key_config_unavailable">该机型未上报按键表，无法读取。</string>
+    <string name="key_action_unknown">未知</string>
     <string name="key_action_none">无操作</string>
     <string name="key_action_voice_assistant">语音助手</string>
     <string name="key_action_previous">上一首</string>

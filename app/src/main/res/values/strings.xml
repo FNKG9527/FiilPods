@@ -187,6 +187,8 @@
     <string name="key_customization">Button actions</string>
     <string name="key_slot">Button %1$d</string>
     <string name="key_config_reading">Reading button settings…</string>
+    <string name="key_config_unavailable">This model does not report a button table.</string>
+    <string name="key_action_unknown">Unknown</string>
     <string name="key_action_none">No action</string>
     <string name="key_action_voice_assistant">Voice assistant</string>
     <string name="key_action_previous">Previous track</string>

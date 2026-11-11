@@ -82,11 +82,26 @@ fun TouchKeysPage(
 
         if (isMate) {
             item { SmallTitle(text = stringResource(R.string.key_customization)) }
-            if (keyActions.size < 11) {
+            // 三种状态必须分开，否则用户看到「读取中」永远转，分不清是没查到还是不支持：
+            //  · size < 11 → 这一轮还没收到回包；
+            //  · size >= 11 但全 -1 → 回包到了但一个键都没解析出来（固件没开放按键表）；
+            //  · 否则按已知动作渲染。
+            val parsed = keyActions.size >= 11
+            val anyKnown = parsed && keyActions.drop(1).any { it >= 0 }
+            if (!parsed) {
                 item {
                     Card(modifier = Modifier.padding(horizontal = 12.dp)) {
                         Text(
                             text = stringResource(R.string.key_config_reading),
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                }
+            } else if (!anyKnown) {
+                item {
+                    Card(modifier = Modifier.padding(horizontal = 12.dp)) {
+                        Text(
+                            text = stringResource(R.string.key_config_unavailable),
                             modifier = Modifier.padding(16.dp),
                         )
                     }
@@ -96,10 +111,15 @@ fun TouchKeysPage(
                     Card(modifier = Modifier.padding(horizontal = 12.dp)) {
                         keyActions.drop(1).take(10).forEachIndexed { index, code ->
                             val keyId = index + 1
+                            val known = code >= 0
                             OverlayDropdownPreference(
                                 title = stringResource(R.string.key_slot, keyId),
-                                summary = actionLabels.getOrElse(actionCodes.indexOf(code)) {
-                                    stringResource(R.string.key_action_none)
+                                summary = if (known) {
+                                    actionLabels.getOrElse(actionCodes.indexOf(code)) {
+                                        stringResource(R.string.key_action_none)
+                                    }
+                                } else {
+                                    stringResource(R.string.key_action_unknown)
                                 },
                                 items = actionLabels,
                                 selectedIndex = actionCodes.indexOf(code).coerceAtLeast(0),

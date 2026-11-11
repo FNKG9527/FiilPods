@@ -828,6 +828,19 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                             announceAlive(this@BluetoothProcessHook.hostContext ?: return@runCatching)
                             // 界面主动来问 → 先强制全量重发一次，再顺手补连接
                             FiilRfcommController.publishState(force = true)
+                            // 「发布」和「查询」是两件事：publishState 只是把**已知**状态再播一遍，
+                            // 从没查到过的字段（例如按键配置、触控灵敏度）无论如何都播不出值。
+                            // 用户点进「触控与按键」页时只会发这两条广播，所以必须在这里补一次协议查询，
+                            // 否则只能等 30s 心跳或重连，页面一直停在「读取中」。
+                            if (FiilRfcommController.isConnected) {
+                                runCatching {
+                                    if (FiilRfcommController.isMateDialect) {
+                                        FiilRfcommController.requestKeyConfig()
+                                    } else {
+                                        FiilRfcommController.requestTouchSensitivity()
+                                    }
+                                }.onFailure { logW("touch/key refresh skipped", it) }
+                            }
                             // LDAC 状态也必须在这里补一次。
                             //
                             // `FiilCodec.publishState` 只在「编码器状态真的变了」时被系统回调
