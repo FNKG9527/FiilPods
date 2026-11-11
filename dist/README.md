@@ -16,7 +16,13 @@ dist/
 
 | 版本 | 产物 | 大小 | 下载 |
 |---|---|---|---|
-| **v3.3.0**（最新） | `FiilPods-v3.3.0-release.apk` | 4.43 MB | 本地构建，未上传 GitHub |
+| **v3.4.3**（最新） | `FiilPods-v3.4.3-release.apk` | 4.46 MB | 本地构建，未上传 GitHub |
+| v3.4.2 | `FiilPods-v3.4.2-release.apk` | 4.45 MB | 同上 |
+| v3.4.1 | `FiilPods-v3.4.1-release.apk` | 4.45 MB | 同上 |
+| v3.4.0 | `FiilPods-v3.4.0-release.apk` | 4.45 MB | 同上 |
+| v3.3.2 | `FiilPods-v3.3.2-release.apk` | 4.43 MB | 同上 |
+| v3.3.1 | `FiilPods-v3.3.1-release.apk` | 4.43 MB | 同上 |
+| v3.3.0 | `FiilPods-v3.3.0-release.apk` | 4.43 MB | 本地构建，未上传 GitHub |
 | v3.3.0 | `FiilPods-v3.3.0-debug.apk` | 34.21 MB | 同上（排查问题用，含完整日志） |
 | v3.2.0 | `FiilPods-v3.2.0-release.apk` | 4.35 MB | [Release v3.2.0](https://github.com/FNKG9527/FiilPods/releases/tag/v3.2.0) |
 | v3.2.0 | `FiilPods-v3.2.0-debug.apk` | 34.09 MB | 同上（排查问题用，含完整日志） |
@@ -39,12 +45,25 @@ dist/
 | v1.0.0 | `FiilPods-v1.0.0-release.apk` | 3.77 MB | [Release v1.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v1.0.0) |
 | v1.0.0 | `FiilPods-v1.0.0-debug.apk` | 46.20 MB | 同上 |
 
-十个版本的**签名完全一致**（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`）。
+所有版本共用同一张签名证书（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`，
+即 Android 调试证书）。2026-11-12 用 `apksigner verify --print-certs` 复验 v3.4.3，digest 仍一致。
 
 ⚠️ **3.1.0 是例外**：为了上架 LSPosed 官方模块仓库，它的包名从 `moe.chenxy.fiilpods` 改成了
 `io.github.fnkg9527.fiilpods`（LSPosed 要求 applicationId 反推的域名归提交者所有）。
 包名不同即不同 App，**3.1.0 不能覆盖安装 3.0.0 及更早版本**，两者可以并存。
 从 3.0.0 升级到 3.1.0 请先卸载旧版再装新版，然后重新在 LSPosed 里启用并勾选作用域。
+
+### 3.3.x / 3.4.x 的 SHA-256
+
+| 版本 | release |
+|---|---|
+| v3.4.3 | `5E5D93B5F291DB28E7E59B5AE74070ACE9D35F300CE84286B93483A53D2C2864` |
+| v3.4.2 | `4EED79CACDFE7F3A136AD906461C07A0C5131C8B15995E730141508F1C1C03A3` |
+| v3.4.1 | `68A872703FC3C2B6E01BB546B7435735B2F33E0215A792426FE71FA54017030A` |
+| v3.4.0 | `50D0FA0F78525FE9791839A069C648F94EFF88120FE94827C566F432C342F08B` |
+| v3.3.2 | `10DC02B118E5190AFE51077B21BA6275F2F73C7E7378F43B5DC3EDD0141A5AB7` |
+| v3.3.1 | `44C9D8C83B0DAC52F7A8D210A3C4FBFF6FF73DA606F4ABCF4B5B4C27EE8B98CC` |
+| v3.3.0 | `29C9A7C2766DF6E50591154BC93C60E32B201BBB179CBD758B07D07B0895EBFA` |
 
 ### 2.2.x / 3.0.x 的 SHA-256
 
