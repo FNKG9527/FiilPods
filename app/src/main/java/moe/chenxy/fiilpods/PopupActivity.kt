@@ -10,6 +10,7 @@ import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,20 +21,28 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import moe.chenxy.fiilpods.config.PodImagePrefs
+import moe.chenxy.fiilpods.pods.FiilAction
+import moe.chenxy.fiilpods.pods.FiilConfig
+import moe.chenxy.fiilpods.pods.FiilModels
 import moe.chenxy.fiilpods.pods.NoiseControlMode
 import moe.chenxy.fiilpods.pods.OppoCompatBridge
 import moe.chenxy.fiilpods.pods.detectDeviceCapabilities
@@ -42,6 +51,7 @@ import moe.chenxy.fiilpods.ui.AppLocale
 import moe.chenxy.fiilpods.ui.AppTheme
 import moe.chenxy.fiilpods.ui.components.AncSwitch
 import moe.chenxy.fiilpods.ui.components.PodStatus
+import moe.chenxy.fiilpods.ui.components.rememberPodImagePainter
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.BatteryParams
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.OppoPodsAction
 import top.yukonga.miuix.kmp.basic.Card
@@ -178,12 +188,42 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     val transparencyVocalEnhancement = remember { mutableStateOf(false) }
     val deviceName = remember { mutableStateOf("") }
     val productId = remember { mutableStateOf<String?>(null) }
+    // 设备产品图的数据来源。弹层此前完全没有画过耳机图（只有三列电量小图标），
+    // 这里补上：`earType` 决定官方型号图，`boxImagePath` 是用户自定义的盒图。
+    val earType = remember { mutableIntStateOf(-1) }
+    val boxImagePath = remember { mutableStateOf<String?>(null) }
+    // 上一次解析过型号的地址，用来判断「是不是换了一副耳机」。
+    val lastImageAddress = remember { mutableStateOf<String?>(null) }
     remember { ConfigManager.refreshFromPrefs(prefs) }
     val capabilities = detectDeviceCapabilities(
         context = context,
         deviceName = deviceName.value,
         productId = productId.value,
     )
+
+    // 从广播里把「型号 + 自定义盒图路径」落到状态上。
+    //
+    // 型号来源按置信度回落：广播带的 earType（最权威）→ 地址绑定（FiilConfig 记录过
+    // 这台耳机认出来的型号）→ 蓝牙名推断。三级都不中才保持 -1，此时画通用盒图。
+    // 与 MiLink 图标（MiLinkServiceHook.headsetTypeIcon）用的是同一套回退链。
+    fun applyDeviceImage(address: String?, type: Int) {
+        // 换了另一副耳机时，先把上一副的型号清掉，避免「A 的头戴图挂在 B 上」。
+        val addr = address?.takeIf { it.isNotBlank() }
+        if (addr != null && addr != lastImageAddress.value) {
+            lastImageAddress.value = addr
+            earType.intValue = -1
+        }
+        val resolved = if (type > 0) {
+            type
+        } else {
+            FiilConfig.readEarTypeForAddress(context, address).takeIf { it > 0 }
+                ?: FiilModels.earTypeOfName(deviceName.value).takeIf { it > 0 }
+                ?: -1
+        }
+        if (resolved > 0) earType.intValue = resolved
+        // 自定义盒图按地址查；查不到就退回「最近连接的那副」，与通知栏取图一致。
+        boxImagePath.value = PodImagePrefs.findOrLatest(prefs, address.orEmpty())?.boxImagePath
+    }
 
     val broadcastReceiver = remember {
         object : BroadcastReceiver() {
@@ -192,8 +232,7 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                 // `BadParcelableException` 是在 Bundle 惰性解包时抛的，属于 Error 之外的
                 // RuntimeException，普通 `?.let`/空判断都挡不住，只能在 onReceive 这一层接住。
                 runCatching {
-                when (p1?.action) {
-                    OppoPodsAction.ACTION_PODS_ANC_CHANGED -> {
+                when (p1?.action) {                    OppoPodsAction.ACTION_PODS_ANC_CHANGED -> {
                         val status = p1.getIntExtra("status", 1)
                         ancMode.value = when (status) {
                             1 -> NoiseControlMode.OFF
@@ -215,10 +254,20 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                         // 读 Parcelable 会在两端构建类名不一致时抛
                         // BadParcelableException → 广播接收器异常 → 进程被 AMS 杀掉。
                         OppoCompatBridge.batteryFromIntent(p1)?.let { batteryParams.value = it }
+                        // 型号与电量同一条广播（FiilAction.EXTRA_EAR_TYPE），一起收。
+                        applyDeviceImage(
+                            address = p1.getStringExtra(FiilAction.EXTRA_ADDRESS),
+                            type = p1.getIntExtra(FiilAction.EXTRA_EAR_TYPE, -1),
+                        )
                     }
                     OppoPodsAction.ACTION_PODS_CONNECTED -> {
                         deviceName.value = p1.getStringExtra("device_name") ?: ""
                         productId.value = p1.getStringExtra("product_id") ?: productId.value
+                        // product_id 就是 earType（见 OppoCompatBridge.publishConnection）。
+                        applyDeviceImage(
+                            address = p1.getStringExtra(FiilAction.EXTRA_ADDRESS),
+                            type = productId.value?.toIntOrNull() ?: -1,
+                        )
                         if (!showDialog.value) showDialog.value = true
                     }
                     OppoPodsAction.ACTION_PODS_DISCONNECTED -> {
@@ -347,7 +396,9 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                     onTransparencyVocalEnhancementChange = ::setTransparencyVocalEnhancement,
                     onMore = onMore,
                     onDone = { showDialog.value = false },
-                    adaptiveModeEnabled = capabilities.adaptiveSupported
+                    adaptiveModeEnabled = capabilities.adaptiveSupported,
+                    earType = earType.intValue,
+                    boxImagePath = boxImagePath.value,
                 )
             } else {
                 PortraitPopupBody(
@@ -360,7 +411,9 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
                     onTransparencyVocalEnhancementChange = ::setTransparencyVocalEnhancement,
                     onMore = onMore,
                     onDone = { showDialog.value = false },
-                    adaptiveModeEnabled = capabilities.adaptiveSupported
+                    adaptiveModeEnabled = capabilities.adaptiveSupported,
+                    earType = earType.intValue,
+                    boxImagePath = boxImagePath.value,
                 )
             }
         }
@@ -378,14 +431,32 @@ private fun PortraitPopupBody(
     onTransparencyVocalEnhancementChange: (Boolean) -> Unit,
     onMore: () -> Unit,
     onDone: () -> Unit,
-    adaptiveModeEnabled: Boolean = true
+    adaptiveModeEnabled: Boolean = true,
+    earType: Int = -1,
+    boxImagePath: String? = null,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Card(modifier = Modifier.fillMaxWidth()) {
-            PodStatus(
-                batteryParams,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp)
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // 设备产品图：型号官方图（用户自定义过则优先用自定义盒图）。
+                // 竖屏宽度够，图放在电量上方，与主界面详情页保持同一视觉。
+                // 用「限定高度 + Fit」而不是「限定宽度 + FillWidth」：产品图宽高比各不相同
+                // （盒子图接近 2:1，头戴图偏方），固定高度能让不同型号的弹层高度保持一致，
+                // Fit 也保证图不会被裁掉、不会画到卡片外面。
+                Image(
+                    painter = rememberPodImagePainter(boxImagePath, earType),
+                    contentDescription = stringResource(R.string.app_name),
+                    modifier = Modifier.height(120.dp),
+                    contentScale = ContentScale.Fit
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                PodStatus(batteryParams, modifier = Modifier.fillMaxWidth())
+            }
         }
         Spacer(modifier = Modifier.height(12.dp))
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -436,7 +507,9 @@ private fun LandscapePopupBody(
     onTransparencyVocalEnhancementChange: (Boolean) -> Unit,
     onMore: () -> Unit,
     onDone: () -> Unit,
-    adaptiveModeEnabled: Boolean = true
+    adaptiveModeEnabled: Boolean = true,
+    earType: Int = -1,
+    boxImagePath: String? = null,
 ) {
     Row(
         modifier = Modifier
@@ -452,11 +525,28 @@ private fun LandscapePopupBody(
             verticalArrangement = Arrangement.Center
         ) {
             Card(modifier = Modifier.fillMaxWidth()) {
-                PodStatus(
-                    batteryParams,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
-                    compact = true
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 横屏高度只有 240dp，产品图放左侧竖排旁，避免压掉电量与 ANC。
+                    Image(
+                        painter = rememberPodImagePainter(boxImagePath, earType),
+                        contentDescription = stringResource(R.string.app_name),
+                        modifier = Modifier
+                            .weight(0.34f)
+                            .heightIn(max = 96.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    PodStatus(
+                        batteryParams,
+                        modifier = Modifier.weight(0.66f),
+                        compact = true
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(8.dp))
             Card(modifier = Modifier.fillMaxWidth()) {

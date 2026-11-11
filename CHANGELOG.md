@@ -7,6 +7,39 @@
 
 ---
 
+## [3.4.2] - 2026-11-11
+
+**状态栏弹层补上设备产品图。** 点通知/点状态栏弹出的界面此前只有三列电量
+小图标与佩戴图标，没有任何耳机产品图 —— 从 OppoPods 前身起就没有，不是
+回归。现在按型号画官方产品图，用户自定义过盒图则优先用自定义图。
+
+### Added
+
+- **弹层产品图**：`PopupActivity` 的竖屏/横屏两套布局都加设备图。竖屏放在
+  电量卡上方（定高 120dp + `ContentScale.Fit`），横屏放在电量卡左侧
+  （`weight(0.34f)`、最高 96dp）—— 横屏整个弹层只有 240dp 高，图铺在上方会
+  把电量与 ANC 挤出去。
+- `ui/components/PodImagePainter.kt`：把 `PodDetailPage` 里私有的
+  `rememberPodImagePainter` 提成共享 Composable，三级回落不变（自定义图 →
+  型号官方图 → `img_box`），`earType <= 0` 故意不用 `fiil_unknow`
+  占位问号图，避免被误读成「识别失败」。`PodDetailPage` 改为引用它。
+
+### Fixed
+
+- **弹层拿不到型号**：`OppoCompatBridge.publishBattery` 的广播补
+  `FiilAction.EXTRA_EAR_TYPE`；`PopupActivity` 从电量广播与连接广播两处获取，
+  后者读 `product_id`（该字段在 FIIL 侧就是 earType 字符串）。都拿不到时按
+  「地址绑定 → 蓝牙名推断」回落，与融合中心图标同一套链。
+- **换型号不换图**：`publishBattery` 的去重 key 补 `earType`。同为头戴的
+  46（Key Max）与 8（Diva）电量可能完全一致，不带 earType 会被去重掉，
+  产品图就停在上一款。
+- **换耳机串图**：弹层记住上一次解析的地址，换地址时先把 earType 清成 -1，
+  避免「A 的头戴图挂在 B 上」。
+
+### Tests
+
+- 22 suite / 178 tests / 0 failures，与 3.4.1 基线一致。
+
 ## [3.4.1] - 2026-11-11
 
 **修复「自定义按键检测不出按键」。** 三个断点叠加导致按键列表永远停在

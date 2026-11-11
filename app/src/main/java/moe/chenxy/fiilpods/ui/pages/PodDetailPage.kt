@@ -1,7 +1,6 @@
 package moe.chenxy.fiilpods.ui.pages
 
 import android.content.res.Configuration
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,14 +14,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,10 +26,10 @@ import androidx.compose.ui.unit.sp
 import moe.chenxy.fiilpods.R
 import moe.chenxy.fiilpods.config.ConfigManager
 import moe.chenxy.fiilpods.pods.NoiseControlMode
-import moe.chenxy.fiilpods.pods.PodImages
 import moe.chenxy.fiilpods.pods.WearStatus
 import moe.chenxy.fiilpods.ui.components.AncSwitch
 import moe.chenxy.fiilpods.ui.components.PodStatus
+import moe.chenxy.fiilpods.ui.components.rememberPodImagePainter
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.BatteryParams
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
@@ -224,21 +219,6 @@ fun PodDetailPage(
         )
     }
 }
-
-@Composable
-private fun rememberPodImagePainter(path: String?, earType: Int) = remember(path, earType) {
-    // 优先级：用户自定义的产品图（path 指向 PodImagePrefs 存的文件）> 型号产品图
-    path?.let {
-        runCatching { BitmapFactory.decodeFile(it) }
-            .getOrNull()
-            ?.let { bitmap -> BitmapPainter(bitmap.asImageBitmap()) }
-    }
-} ?: painterResource(
-    // earType 未知（-1）时 PodImages 会落到 fiil_unknow；
-    // 但这里更希望保持旧的万能盒子图，因为 fiil_unknow 是「官方也不认识这型号」的兜底，
-    // 用在本模块里会让人误以为识别失败。所以只在确实识别出型号时才换图。
-    if (earType > 0) PodImages.drawableOf(earType) else R.drawable.img_box,
-)
 
 private fun LazyListScope.podControlItems(
     batteryParams: BatteryParams,

@@ -232,7 +232,9 @@ object OppoCompatBridge {
 
     private fun publishBattery(ctx: Context, s: FiilStatus, force: Boolean) {
         val headphones = FiilModels.isHeadphones(s.earType)
-        val key = "${s.batteryLeft}/${s.batteryRight}/${s.batteryCase}/${s.charging}/$headphones"
+        // earType 进 key：换型号（同为头戴的 46 → 8）时电量一模一样，但弹层/通知的
+        // 产品图必须跟着换，不带上就会因为「电量没变」被去重掉。
+        val key = "${s.batteryLeft}/${s.batteryRight}/${s.batteryCase}/${s.charging}/$headphones/${s.earType}"
         if (!force && lastBattery == key) return
         lastBattery = key
 
@@ -282,6 +284,9 @@ object OppoCompatBridge {
             putExtra(EXTRA_BATTERY_CASE, caseExtra)
             putExtra(EXTRA_BATTERY_CHARGING, if (s.charging) 1 else 0)
             putExtra(EXTRA_BATTERY_HEADPHONES, if (headphones) 1 else 0)
+            // 型号也要跟着电量一起走：弹层（PopupActivity）是独立进程/独立 Activity，
+            // 只能靠这条广播知道「现在连的是哪一款」，好把产品图换成对应型号。
+            putExtra(FiilAction.EXTRA_EAR_TYPE, s.earType)
         }
     }
 
