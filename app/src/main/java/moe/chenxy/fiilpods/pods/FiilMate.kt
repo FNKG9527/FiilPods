@@ -306,7 +306,18 @@ object FiilMate {
          * LDAC **授权/激活**写入，payload = 17 字节授权码 —— `c.java:287-300 setActivationLdac(byte[])`。
          *
          * 取消激活时 APP 传 17 个 0 字节（`F046HomeFragment.java:94-95`）。
-         * 模块不做授权码输入（那是官方 App 的商业流程），只保留常量以便将来支持「取消激活」。
+         *
+         * ⚠ v3.4.3 修正了这里的旧注释。旧注释写「模块不做授权码输入」，
+         * 但真机实测（FIIL Key Max / F046 / 固件 3.0.1.1）证明两件事：
+         *
+         *  1. **固件会校验 license 内容**。写 `00+UUID`、全零、15 种校验和、
+         *     43 种派生值，ACK 全部回 `00`（成功），但 `142` 全部变回 `00`。
+         *     即 ACK 只表示「命令被收到」，不代表「被接受」——判断唯一依据是回读
+         *     [Query.LDAC_UNLOCK]。
+         *  2. **写错内容会清掉已有解锁状态**，且不会自动恢复。
+         *
+         * 因此本模块的 `writeLdacLicense` 只在用户显式确认、且明确知道风险时才会调用，
+         * 不做任何「自动造码」的猜测——`activateCode` 含服务器侧私有盐，离线伪造已被证伪。
          */
         const val LDAC_ACTIVATE = 12    // c.java:287 setActivationLdac
         const val TUNING = 8            // f.java setTuning（云感调音）
@@ -381,6 +392,81 @@ object FiilMate {
         const val OPEN = 2
         const val LISTEN = 3
         const val WIND = 4
+    }
+
+    /**
+     * license（17 字节）的构造与解析。
+     *
+     * 物理形态（`UnlockLDACActivity.java:213-218`）：
+     * ```
+     * license[0]    = 耳别   0x00 = 左耳，0x01 = 右耳
+     * license[1..16]= 16 字节授权内容
+     * ```
+     *
+     * ⚠ F046 / F048 的**写入次数不同**，这是最容易写错的地方：
+     *  · **F046**（`F046UnlockLDACActivity.java:106-117`）只写**一次**，`license[0]` 硬编码 0；
+     *  · **F048**（`UnlockLDACActivity.java:219` type=3）**左、右各写一次**，0/1 前缀各一份。
+     *
+     * ⚠ 固件会校验内容，写错会把 `142` 清掉（真机实测）。详见 [Param.LDAC_ACTIVATE]。
+     */
+    object License {
+        const val LEN = 17
+        const val EAR_LEFT = 0x00.toByte()
+        const val EAR_RIGHT = 0x01.toByte()
+
+        /** 协议栈里有 `setActivationLdac` 的两个机型族（UI 据此决定是否显示入口）。 */
+        const val EAR_TYPE_F046 = 46
+        const val EAR_TYPE_F048 = 48
+
+        /**
+         * 把 16 字节授权内容按耳别包成 17 字节 license。
+         *
+         * @param content 16 字节（授权码本身）
+         * @param ear     [EAR_LEFT] 或 [EAR_RIGHT]
+         * @throws IllegalArgumentException content 长度不是 16
+         */
+        fun build(content: ByteArray, ear: Byte = EAR_LEFT): ByteArray {
+            require(content.size == 16) { "license content 必须是 16 字节，收到 ${content.size}" }
+            val out = ByteArray(LEN)
+            out[0] = ear
+            content.copyInto(out, destinationOffset = 1)
+            return out
+        }
+
+        /** 官方「取消激活」原语：17 个 0（`F046HomeFragment.java:94-95`）。 */
+        fun zeroLeft(): ByteArray = ByteArray(LEN)
+
+        /** 右耳的取消形态：`01` + 16 个 0（`CcPro2NewEleFragment.java:645-647`）。 */
+        fun zeroRight(): ByteArray = ByteArray(LEN).also { it[0] = EAR_RIGHT }
+
+        /** 16 字节授权内容 → 32 位小写 hex（官方 App 里 `activateCode` 的单耳形态）。 */
+        fun contentToHex(content: ByteArray): String =
+            content.joinToString("") { "%02x".format(it) }
+
+        /**
+         * 解析用户粘贴的授权码文本。
+         *
+         * 接受官方 App 的两种形态：
+         *  · `"<左32hex>,<右32hex>"`（`UnlockLDACActivity` 的双耳形态）
+         *  · `"<32hex>"`（单耳形态，F046 就是这种）
+         *
+         * @return 拆分后的 16 字节块，长度 1 或 2
+         * @throws IllegalArgumentException hex 长度/字符非法
+         */
+        fun parseActivateCode(text: String): List<ByteArray> {
+            val parts = text.trim().split(",", " ").map { it.trim() }.filter { it.isNotEmpty() }
+            require(parts.size in 1..2) { "授权码应为 1 段或 2 段，收到 ${parts.size} 段" }
+            return parts.map { part ->
+                val hex = part.filter { !it.isWhitespace() && it != '-' }
+                require(hex.length == 32) { "每段授权码必须是 32 位 hex，收到 ${hex.length} 位" }
+                ByteArray(16) { i ->
+                    val hi = Character.digit(hex[i * 2], 16)
+                    val lo = Character.digit(hex[i * 2 + 1], 16)
+                    require(hi >= 0 && lo >= 0) { "授权码含非 hex 字符：${hex[i * 2]}${hex[i * 2 + 1]}" }
+                    ((hi shl 4) or lo).toByte()
+                }
+            }
+        }
     }
 
     /**

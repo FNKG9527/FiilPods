@@ -69,9 +69,15 @@ fun PodDetailPage(
     ldacSupported: Boolean = false,
     /** 是否收到过耳机侧 LDAC 状态回包；没收到过时摘要显示「--」而不是「关」。 */
     ldacKnown: Boolean = false,
-    /** 耳机侧 LDAC 是否已解锁/授权；未解锁时摘要提示需先用官方 App 解锁。 */
+    /** 耳机侧 LDAC 是否已解锁/授权；未授权时摘要提示可直接开启（实测无需授权）。 */
     ldacUnlocked: Boolean = false,
     onLdacChange: (Boolean) -> Unit = {},
+    /**
+     * 用户点了「写入授权码」。非 null 时说明该机型协议栈里有 `setActivationLdac`。
+     *
+     * 只有 F046 / F048 两族为真（[moe.chenxy.fiilpods.pods.FiilModels.supportsLdacLicense]）。
+     */
+    onWriteLicense: (() -> Unit)? = null,
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
     spatialAudioSupported: Boolean = false,
@@ -152,6 +158,7 @@ fun PodDetailPage(
                     ldacKnown = ldacKnown,
                     ldacUnlocked = ldacUnlocked,
                     onLdacChange = onLdacChange,
+                    onWriteLicense = onWriteLicense,
                     onToneVolumeChange = onToneVolumeChange,
                     onLowLatencyModeChange = onLowLatencyModeChange,
                     spatialAudioSupported = spatialAudioSupported,
@@ -206,6 +213,7 @@ fun PodDetailPage(
             ldacKnown = ldacKnown,
             ldacUnlocked = ldacUnlocked,
             onLdacChange = onLdacChange,
+            onWriteLicense = onWriteLicense,
             onToneVolumeChange = onToneVolumeChange,
             onLowLatencyModeChange = onLowLatencyModeChange,
             spatialAudioSupported = spatialAudioSupported,
@@ -243,9 +251,15 @@ private fun LazyListScope.podControlItems(
     ldacSupported: Boolean = false,
     /** 是否收到过耳机侧 LDAC 状态回包；没收到过时摘要显示「--」而不是「关」。 */
     ldacKnown: Boolean = false,
-    /** 耳机侧 LDAC 是否已解锁/授权；未解锁时摘要提示需先用官方 App 解锁。 */
+    /** 耳机侧 LDAC 是否已解锁/授权；未授权时摘要提示可直接开启（实测无需授权）。 */
     ldacUnlocked: Boolean = false,
     onLdacChange: (Boolean) -> Unit = {},
+    /**
+     * 用户点了「写入授权码」。非 null 时说明该机型协议栈里有 `setActivationLdac`。
+     *
+     * 只有 F046 / F048 两族为真（[moe.chenxy.fiilpods.pods.FiilModels.supportsLdacLicense]）。
+     */
+    onWriteLicense: (() -> Unit)? = null,
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
     spatialAudioSupported: Boolean,
@@ -392,8 +406,14 @@ private fun LazyListScope.podControlItems(
                 //
                 // 状态语义：
                 //  · ldacKnown=false（还没收到 143 回包）→ 摘要显示「读取中」，开关可点；
-                //  · ldacUnlocked=false（耳机未授权）→ 摘要提示先用官方 App 解锁；
+                //  · ldacUnlocked=false（耳机未授权）→ **仍然可点**，只是提示授权缺失；
                 //  · 否则按 ldacState 显示开/关。
+                //
+                // ⚠ v3.4.3：旧摘要是「需先在 FIIL+ 官方 App 里解锁高清音频」，但那个
+                // 官方 App 的激活服务器（newservice.fiil.com）早已 NXDOMAIN，等于把用户
+                // 指向一条死路。真机实测（Key Max / F046）证明 142（授权）与 143（开关）
+                // 是两条独立路径：142=00 时开 LDAC 依然生效（143 翻 1、144=02）。
+                // 所以这里改成「授权缺失但可直接开」的表述，不再阻止操作。
                 //
                 // ⚠️ 标题/摘要用「字面量常量」而不是 stringResource(R.string.xxx)：
                 // R8 + shrinkResources 会把只被这一处引用的资源当成无用资源删掉（实测
@@ -401,7 +421,7 @@ private fun LazyListScope.podControlItems(
                 // 连同资源 ID 一起消失，而 dex 里字段引用还在，运行时就是 Resources$NotFound），
                 // 所以这里从源码常量取文本，彻底摆脱对资源 ID 的依赖。
                 val ldacSummary = when {
-                    !ldacUnlocked -> "需先在 FIIL+ 官方 App 里解锁高清音频"
+                    !ldacUnlocked -> LDAC_UNLICENSED
                     !ldacKnown -> "正在读取耳机状态…"
                     ldacState > 0 -> LDAC_ENABLED
                     else -> LDAC_SUMMARY
@@ -412,6 +432,26 @@ private fun LazyListScope.podControlItems(
                     checked = ldacState > 0,
                     onCheckedChange = onLdacChange
                 )
+                // 「写入授权码」只在协议栈真有 setActivationLdac 的机型上出现
+                // （F046 / F048，见 FiilModels.supportsLdacLicense）。
+                //
+                // 为什么还要这个入口：官方激活服务器 newservice.fiil.com 已 NXDOMAIN，
+                // 用户手里若还留着自己耳机的授权码（以前从官方 App 抄下来的），
+                // 这是唯一还能把它写回去的地方。
+                if (onWriteLicense != null) {
+                    BasicComponent(
+                        title = LDAC_LICENSE_TITLE,
+                        summary = if (ldacUnlocked) LDAC_LICENSE_SUMMARY_UNLOCKED
+                        else LDAC_LICENSE_SUMMARY_LOCKED,
+                        onClick = onWriteLicense,
+                        endActions = {
+                            Icon(
+                                imageVector = MiuixIcons.Basic.ArrowRight,
+                                contentDescription = null,
+                            )
+                        },
+                    )
+                }
             }
             if (dualDeviceSupported) {
                 SwitchPreference(
@@ -440,3 +480,27 @@ internal const val LDAC_TITLE: String = "LDAC 编解码器"
 internal const val LDAC_SUMMARY: String = "启用高解析蓝牙音频（需耳机与手机同时支持）"
 internal const val LDAC_UNSUPPORTED: String = "当前耳机不支持 LDAC"
 internal const val LDAC_ENABLED: String = "已启用"
+
+/**
+ * 耳机侧 `142`（LDAC 授权）为 `00` 时的摘要。
+ *
+ * 不再写「需先在 FIIL+ 官方 App 里解锁」——官方激活服务器 `newservice.fiil.com`
+ * 已经 NXDOMAIN，那句话等于把用户指向死路。真机实测（FIIL Key Max / F046 / 固件 3.0.1.1）
+ * 表明授权与开关是两条独立路径，未授权时开关照样生效。
+ */
+internal const val LDAC_UNLICENSED: String = "耳机未记录授权信息，但可直接开启（实测无需授权）"
+
+/**
+ * 「写入 LDAC 授权码」入口的文案。
+ *
+ * 官方激活服务器 `newservice.fiil.com` 已 NXDOMAIN，这是把手里的旧授权码
+ * 写回耳机的唯一入口。只有 F046 / F048 两族会显示（协议栈里有 `setActivationLdac`）。
+ *
+ * ⚠ 摘要里必须写清「写错会清掉已有授权」——这条命令的副作用不可逆，
+ * 真机实测过（写 `00+UUID` 把已解锁的耳机写成了 142=00，且无法恢复）。
+ */
+internal const val LDAC_LICENSE_TITLE: String = "写入 LDAC 授权码"
+internal const val LDAC_LICENSE_SUMMARY_UNLOCKED: String =
+    "耳机已记录授权信息；仍可手动覆盖（写错会清掉授权，慎用）"
+internal const val LDAC_LICENSE_SUMMARY_LOCKED: String =
+    "官方激活服务器已下线；若你留有本机授权码，可在此写入"

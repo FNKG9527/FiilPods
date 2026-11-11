@@ -60,6 +60,7 @@ import moe.chenxy.fiilpods.pods.EqDevicePreset
 import moe.chenxy.fiilpods.pods.WearState
 import moe.chenxy.fiilpods.pods.WearStatus
 import moe.chenxy.fiilpods.pods.detectDeviceCapabilities
+import moe.chenxy.fiilpods.ui.components.LdacLicenseDialog
 import moe.chenxy.fiilpods.ui.pages.AboutPage
 import moe.chenxy.fiilpods.ui.pages.EqualizerPage
 import moe.chenxy.fiilpods.ui.pages.RfcommDebugPage
@@ -173,6 +174,13 @@ fun MainUI(
     var connectingDeviceAddress by remember { mutableStateOf<String?>(null) }
     var connectedDeviceAddress by remember { mutableStateOf("") }
     var showConnectErrorDialog by remember { mutableStateOf(false) }
+    /**
+     * LDAC 授权码对话框是否显示。
+     *
+     * 只在用户主动点「写入 LDAC 授权码」时置 true —— 这条命令有破坏性
+     * （写错会清掉耳机已有的解锁状态），不能有任何自动或顺带的触发路径。
+     */
+    var showLicenseDialog by remember { mutableStateOf(false) }
     var hookConnectionState by remember { mutableStateOf("disconnected") }
     var pendingOpenEarphonesAfterPickerLoaded by remember { mutableStateOf(false) }
     var lastBluetoothServiceAliveMs by remember { mutableStateOf(0L) }
@@ -876,6 +884,28 @@ fun MainUI(
         }
     }
 
+    /**
+     * 把用户输入的 LDAC 授权码发给蓝牙进程写入耳机。
+     *
+     * 只转发**文本**：解析（[moe.chenxy.fiilpods.pods.FiilMate.License.parseActivateCode]）
+     * 与组帧（[moe.chenxy.fiilpods.pods.FIILProtocol.writeLdacLicense]）都在蓝牙进程里做，
+     * 因为 UI 进程没有 RFCOMM/GATT 通道。
+     *
+     * ⚠ 不做乐观更新：写授权码的结果无法从命令 ACK 判断（固件会校验内容，
+     * ACK 只表示收到）。真实结果只能靠蓝牙进程回读 `142` 后广播回来。
+     */
+    fun writeLdacLicense(hex: String) {
+        for (pkg in arrayOf("com.android.bluetooth", "com.xiaomi.bluetooth")) {
+            Intent(FiilAction.ACTION_WRITE_LDAC_LICENSE).apply {
+                putExtra(FiilAction.EXTRA_LICENSE_HEX, hex)
+                setPackage(pkg)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                context.sendBroadcast(this)
+            }
+        }
+        showLicenseDialog = false
+    }
+
     fun onDeviceDisconnect(device: BluetoothDevice) {
         connectingDeviceAddress = null
         pendingOpenEarphonesAfterPickerLoaded = false
@@ -1042,6 +1072,15 @@ fun MainUI(
                 ldacKnown = ldacKnown.value,
                 ldacUnlocked = ldacUnlocked.value,
                 onLdacChange = { setLdacEnabled(it) },
+                // 只有协议栈里真有 setActivationLdac 的机型（F046/F048）才给写入入口，
+                // 其余机型传 null，详情页据此不显示那一行。
+                onWriteLicense = if (
+                    FiilModels.supportsLdacLicense(connectedEarType.intValue)
+                ) {
+                    { showLicenseDialog = true }
+                } else {
+                    null
+                },
                 spatialAudioSupported = displayCapabilities.spatialAudioSupported,
                 spatialSoundSupported = displayCapabilities.spatialSoundSwitchSupported,
                 adaptiveModeEnabled = displayCapabilities.adaptiveSupported,
@@ -1344,7 +1383,19 @@ fun MainUI(
         },
         content = navContent,
     )
+
+    // LDAC 授权码对话框。放在 NavDisplay **之外**，这样任何页面（详情页、横屏分栏）
+    // 触发时都能弹出，且不会随页面切换被销毁。
+    LdacLicenseDialog(
+        show = showLicenseDialog,
+        earType = connectedEarType.intValue,
+        onDismiss = { showLicenseDialog = false },
+        onConfirm = { writeLdacLicense(it.joinToString(",") { b -> b.toHex() }) },
+    )
 }
+
+/** 16 字节授权内容 → 32 位小写 hex（与官方 App 的 `activateCode` 单耳形态一致）。 */
+private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
 @Composable
 fun appBackground(): Color = MiuixTheme.colorScheme.surface
