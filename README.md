@@ -216,16 +216,19 @@ Mate 机型建立 RFCOMM 链路后，**必须先发一条解锁帧**，否则耳
 | **[FiilPods](https://github.com/FNKG9527/FiilPods)** | **本项目**。FIIL 耳机的 HyperOS 系统级控制模块（Xposed/LSPosed） | Kotlin · GPL-3.0 |
 | **[fiil-headphone-protocol](https://github.com/FNKG9527/fiil-headphone-protocol)** | FIIL 蓝牙控制协议的逆向笔记：GAIA / Mate / 豆包三套命令空间的帧格式、190 条命令表与实机验证日志 | 文档 · CC-BY-SA-4.0 |
 | **[fiil-pods-pc](https://github.com/FNKG9527/fiil-pods-pc)** | Windows PC 控制台：走 BLE GATT，tkinter GUI，PyInstaller + Inno Setup 打包成安装程序 | Python · GPL-3.0 |
-| **[fiil-ldac-unlock](https://github.com/FNKG9527/fiil-ldac-unlock)** | LDAC 离线激活工具集：官方服务器下线后，如何在自己买的耳机上重新打开 LDAC | Python · GPL-3.0 |
+| **[fiil-ldac-unlock](https://github.com/FNKG9527/fiil-ldac-unlock)** | LDAC 解锁链路的研究记录（**已失败收尾**）：66 个 license 候选全部被固件拒绝，不提供工具下载 | Python · GPL-3.0 |
 
 **四者的关系**：
 
 - **fiil-headphone-protocol** 是协议层的事实来源。本模块 `docs/PROTOCOL_FIIL.md` 里的帧格式、
   `cid`/`cmdId` 对照、190 条 GAIA 命令表，与该仓库互相印证；碰上「这条命令到底该发什么」的疑问，
   两边交叉查比单看一边可靠。
-- **fiil-ldac-unlock** 解决的是「LDAC 怎么打开」，本模块 `pods/FIILProtocol.kt` 里的
-  `setLdacSwitch()` / `requestLdacState()` 与它同源（`cid=1 cmdId=13` 写、`cid=39 cmdId=143` 读）。
-  v2.2.2 那轮「详情页看不到 LDAC 开关」的定论就是在这里对上的。
+- **fiil-ldac-unlock** 记录的是一次**失败**的解锁尝试。本模块 `pods/FIILProtocol.kt` 里的
+  `setLdacSwitch()` / `requestLdacState()` 与它同源（`cid=1 cmdId=13` 写、`cid=39 cmdId=143` 读），
+  v2.2.2 那轮「详情页看不到 LDAC 开关」的定论就是在那里对上的。
+  **但结论要分清**：能发开关命令 ≠ 耳机一定走 LDAC —— `142`（授权）为 `00` 时耳机不会向手机
+  宣告 LDAC 能力，A2DP 只能协商出 AAC。所以本模块不提供写授权码的功能，
+  `LDAC 开关` 能否真正生效取决于耳机自身的授权状态。
 - **fiil-pods-pc** 走 BLE GATT（`fiil_pods_pc` 的 `FIILPeripheral` 路线），本模块在蓝牙资源被
   经典音频链路占用、BLE 广播消失的场景下，也会落回同样的 GATT 通道，两边踩的是同一批坑。
 
