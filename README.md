@@ -318,7 +318,7 @@ Mate 机型建立 RFCOMM 链路后，**必须先发一条解锁帧**，否则耳
 | 🏗 [架构分析](docs/ARCH_OPPOPODS.md) | OppoPods 架构拆解（UI 移植依据） |
 | ✅ [验收报告](docs/ACCEPTANCE_REPORT.md) | 6 角色联合结项验收（72/100，「可内测」） |
 | 🔬 [F046 LDAC 研究档案](docs/RESEARCH_2026-11_F046_LDAC.md) | 142 授权位为什么写不进去：协议字典、帧形状纠错、10 条踩坑清单、5000+ 次失败记录 |
-| 🛠 [F046 LDAC 改动清单](docs/TASKS_2026-11_F046_LDAC.md) | 由上条研究推出的模块改动项（P0/P1/P2），含恢复出厂必须提示重启等 |
+| 🛠 [F046 LDAC 改动清单](docs/TASKS_2026-11_F046_LDAC.md) | 由上条研究推出的模块改动项（P0/P1/P2）：`ldacUnlocked` 解析判长度、静默 return 要反馈 UI、诊断面板等 |
 | 📝 [更新日志](CHANGELOG.md) | 1.0.0 → 3.2.0 完整变更 |
 | 🤝 [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md) | 提 PR 与漏洞上报 |
 
