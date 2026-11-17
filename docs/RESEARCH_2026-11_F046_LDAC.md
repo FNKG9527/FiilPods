@@ -15,6 +15,11 @@
 > LDAC 的**授权**（142）是固件里的一个独立布尔位，**不服从 Mate 协议的任何写入**，
 > 累计 5000+ 次写入尝试全部失败。它与设备 UUID 无关、与 140/141 存储槽内容无关、
 > 与重启时序无关。**目前判断它由固件内嵌密钥的密码学校验或未暴露的激活流程控制。**
+>
+> **2026-11-17 修订说明**：本文修正了 7 处错误（见 §4 坑 3b 与 §5.1 的判定依据表）。
+> 最重要的一处是：把 `F39AppSettingRequest`（F048/CC Pro2）的帧形状误当成 F046 的，
+> 导致「恢复出厂锁写入」「延迟不生效」「143 是前置条件」三条结论的证据链不成立，
+> 已在 §2.5 / §2.6 / §5.1 逐条标注为「待重测」。**下面仍标注 ✅ 的结论都重新核实过帧形状。**
 
 ---
 
@@ -171,29 +176,75 @@ public void setUnlock(com.fengeek.main.i.d.i.b infoListener) {
 | `40` | `NOTIFY` | 耳机→手机 | 主动上报 |
 | `41` | `SET_LANGUAGE` | 写 | 仅 F049/F051/F053 |
 | `44` | `SET_MAF` | 写 | MAF 档位 |
-| `50` | `SET_SPATIAL_AUDIO` | 写 | 影院模式（**只有 F046 支持**） |
+| `50` | `SET_SPATIAL_AUDIO` | 写 | 影院模式（**只有 F046 支持**，只在 `c.java`） |
+| `2305` | — | 读 | **另一套 BLE 协议**，见下方警告 |
 
-**全库 `setCommandClassifyId(...)` 的实参只有** `1/2/3/32/33/34/36/37/38/39/41/44`，**从不出现 40**——
+**全库 `setCommandClassifyId(...)` 的实参只有** `1/2/3/32/33/34/36/37/38/39/41/44/50`，**从不出现 40**——
 40 只出现在 `*MainFragment` 的 notify 分支判断里。
+
+> **⚠ `cid=2305` 不是 Mate 协议。** 它出现在 `com\fengeek\main\ble\c.java`
+> （`getMusicState` L190 / `getVersion` L222 / `getVolume` L238），是**老 BLE 外设**（`FIILPeripheral`）
+> 那套独立协议，帧结构与 Mate 完全不同。别把它混进 cid 表。
 
 ### 2.3 `cid=1` 的 SET 子命令（写参数）
 
-**格式**：`[seq][01][01][00][plen=03][cmdId][len=01][value]`，回显 `[seq][01][02][00][01][cmdId][00/01]`
+> **★★★ 读这一节前必须先看这里：APK 里有**两套**互不兼容的 `cid=1` 写参数接口。**
+>
+> | | 体系 A（F046 实际使用） | 体系 B（F048 / CC Pro2） |
+> |---|---|---|
+> | 类 | `com.fengeek.main.i.d.c` | `com.bluetrum.devicemanager.f39.request.F39AppSettingRequest` |
+> | 形态 | `cmdId` 直接区分命令，payload 各自定义 | **固定 `cmd=12`**，payload = `[type, 1, value]` |
+> | F046 用不用 | ✅ 全部设置都走这套 | ❌ F046 一次都不调 |
+>
+> **这两套的 `12` 含义完全不同**：体系 A 的 `cmd=12` 是 `setActivationLdac`（17 字节 license）；
+> 体系 B 的 `cmd=12` 是「所有设置的统一入口」，靠 payload 首字节区分。
+> **把 B 的 `[type,1,value]` 发到 A 的 cmdId 上，一定 `ACK=1`** —— 这就是下面「坑 9」的成因。
 
-| cmdId | 名称 | 取值 | 源码 |
+#### 体系 A：`com.fengeek.main.i.d.{b,c,d,e,f,g,h}.java`
+
+**格式**：`[seq][01][01][00][plen][cmdId][len][value...]`，回显 `[seq][01][02][00][plen][cmdId][len][ack]`
+
+| cmdId | 方法 | payload | 哪些机型类有 |
 |---|---|---|---|
-| `2` | `setTone` | 提示音音量 `0/1/2` | `c.java` |
-| `3` | `setTipVolume` | 语音提示音量 `0..3` | `c.java` |
-| `6` | `setMultiConnect` | 多点连接 `0/1` | `c.java` |
-| `8` | `setLowDelay` | 低延迟 `0/1` | `f.java:738` |
-| `10` | `setLanguage` | 语言（老机型） | `h.java:488` |
-| `12` | `setActivationLdac` | LDAC 激活，**payload 是 17 字节 license** | `c.java:287` |
-| `13` | `setLdacSwitch` | LDAC 开关 `0/1` | `c.java:371` |
-| `14` | `setEQAdaptive` | 自适应 EQ（F049+） | `f.java:470` |
-| `15` | `setEarAdaptive` | 耳道自适应（F049+） | `f.java:487` |
-| `16` | `setNoiseAdaptive` | 环境自适应（F049+） | `f.java:622` |
-| `17` | `setWindAdaptive` | 风噪自适应（F049/F051） | `f.java:772` |
-| `18` | `setTuning` | 云感调音（F049+） | `f.java:704` |
+| `1` | `setChangLan` | `[0/1]` | b/c/d/e/f/g/h **全部** |
+| `3` | `setTone` | `[0..3]`（提示音音量） | b/c/d/e/f/g/h **全部** |
+| `6` | `setPair` | `[1]`（固定） | d/f/g/h |
+| `8` | `setTuning` | `[0/1]`（云感调音） | **f**（F049） |
+| `10` | `setHelpSlep` | `[0/1]` | **h**（F053） |
+| `12` | `setActivationLdac` | **17 字节 license** | **c/e**（F046/F048） |
+| `13` | `setLdacSwitch` | `[0/1]` | c/e/f/g/h |
+| `14` | `setEQAdaptive` | `[0/1]` | f/g/h |
+| `15` | `setEarAdaptive` | `[0/1]` | f/h |
+| `16` | `setNoiseAdaptive` | `[0/1]` | f/g/h |
+| `17` | `setWindAdaptive` | `[0/1]` | **f** |
+| `18` | `setSingle` | `[0/1]`（单耳模式） | **f** |
+
+→ **F046 只用到 `1 / 3 / 12 / 13` 四个**（`c.java` 里 `cid=1` 的 set 方法就这四个）。
+
+#### 体系 B：`F39AppSettingRequest`（F046 不调，写在这里防止误用）
+
+```java
+// 全部 super((byte) 1)，payload 首字节 = type
+multiConnectSetting(v) → {6, 1, v}
+sendMultipointRequest(v)→ {1, 1, v}
+sendTipVolumeRequest(v)→ {3, 1, v}
+sendToneRequest(v)     → {2, 1, v}
+setActivateLdac(arr)   → {12, 17, ...arr}      ← 注意第二字节是硬编码 17
+setLDAC(v)             → {13, 1, v}
+setOfflineSleep(v)     → {11, 1, v}
+setSleep(arr)          → {10, 5, arr[0..4]}
+earReaction(v)         → {9, 1, v}
+```
+调用点**只有 CC Pro2 的页面**：`F39HelpSleepActivity`（setSleep ×6 / setOfflineSleep）、
+`CcPro2NewEleFragment`（setActivateLdac ×2 / setLDAC ×1）、`CcPro2NewSetFragment`
+（sendMultipointRequest / earReaction / multiConnectSetting 各 ×1）、
+`CcPro2NewStyleFragment`（sendToneRequest / sendTipVolumeRequest 各 ×1）、
+`UnlockLDACActivity`（setActivateLdac ×2）。**`com\fengeek\main\f046\*` 零命中。**
+
+> **★ 这张表在 2026-11-17 被全面重写过。** 上一版把体系 B 的 `2/6/9` 和体系 A 的
+> `8/18` 混在一张表里，还把 `8` 写成 `setLowDelay`、把 `18` 写成 `setTuning` —— 全错。
+> 真实情况：**`8 = setTuning`，`18 = setSingle`，`setLowDelay` 走 `cid=37` 不是 `cid=1`。**
+> 核对方法：逐个文件提取 `setCommandClassifyId(N)` + `setCommandId(M)` + `setBuffer(...)` 三元组。
 
 > **★ `cmd=12` 与 `cmd=13` 是两个不同的命令，别混。**
 > 历史上我曾用 `cmd=12` 发 `[13,1,1]` 想开 LDAC，全部 `ACK=1` 被拒，误判成「写入通道被锁」。
@@ -268,12 +319,31 @@ RX  0A 24 02 00 01 00        ← payload[0] = 00，被接受
 **断电重启后立即恢复**（`setLDAC(1)` 回 `ACK=0`）。
 期间试过 5 种自救（握手后立刻写 / 连写 3 次 / 读完设备信息再写 / 重新握手再写 / 探测 cmd 0-255）全失败。
 
-> **模块侧注意**：若给用户提供「恢复出厂」入口，必须提示**重启耳机**，
-> 否则后续所有设置操作都会静默失败（`ACK=01` 但 UI 无感）。
+> **⚠⚠ 2026-11-17 复核：这段的「17 次 SET 全 ACK=01」证据链有问题，请按一半结论使用。**
+>
+> 那次用的帧是 `bytes([cmd, 1, v])` —— **体系 B**（`F39AppSettingRequest`）的形状，
+> 挂在了**体系 A** 的 cmdId 上（详见 §2.3 的两套 API 警告）。对体系 A 来说
+> `setTone` 应是 `payload=[v]`、`setLDAC` 应是 `payload=[v]`，都只有 1 字节。
+> → **「17 次 SET 全 ACK=01」只证明「形状错了会被拒」，不能证明「恢复出厂锁了写入通道」。**
+>
+> 但下面这条**仍然成立且有独立证据**：
+> - 恢复出厂**确实**重置了 `143`（`01→00`）与 `144`（`01→02`），且**不动 `142`** —— 前后快照直接对比，不依赖 ACK。
+> - `cid=36` 的回包 `0A 24 02 00 01 00`（`payload[0]=00`）确实表示被接受 —— `probe_last_dims.py` 的
+>   classifyId 扫描里 `cid=0x24` 独立复现了同一回包。
+>
+> 待耳机上线后需补测：**恢复出厂前后各发一次正确形状的 `setTone payload=[v]`，对比 ACK。**
+> 若前后都是 `0`，则「恢复出厂临时锁写入」这条**作废**，§2.5 只剩「重置 143/144、不动 142」。
+> （脚本 `probe_retest_correct_shape.py` 覆盖的是 §5.4 的另外三条，这条要单独补——
+> 见 §5.4 第 3 条旁的备注。）
+
+> **模块侧注意**：若给用户提供「恢复出厂」入口，稳妥做法仍是提示**重启耳机**再继续操作 ——
+> 这条建议不会因为上面那条待验证而变坏，只是理由要从「写通道被锁」改成「状态可能未稳定」。
 
 ### 2.6 `ACK` 的真实语义（重要，别当成内容校验）
 
-`cid=1` 的 SET 回显末字节，**只由两个条件决定**：
+**先说适用范围**：下面这张表**只对 `cid=1 cmd=12`（体系 A 的 `setActivationLdac`）**有效。
+
+`cmd=12` 的 SET 回显末字节，**只由两个条件决定**：
 
 ```
 ACK = 0  当且仅当  len == 17  且  payload[0] ∈ {0x00, 0x01}
@@ -306,6 +376,23 @@ ACK = 1  其它一切情况
 
 > **★ 对 `setLDAC`（cmd=13）不适用**：它 1 字节 payload 就能拿到 `ACK=0`。
 > 上面这套规则只描述 `cmd=12`（activateLdac）。
+
+> **⚠ 2026-11-17 复核：这条结论的证据链有一处毛病，但结论本身仍站得住。**
+>
+> 当初测「已知命令 × 值 0/1」时（`probe_ack_semantics.py:174`），我发的是
+> `bytes([cmd, 1, v])` —— 这是**体系 B**（`F39AppSettingRequest`）的形状，
+> 却挂在了体系 A 的 cmdId 上。对体系 A 来说 `setTone` 应该是 `payload=[v]`（1 字节）。
+> 所以「`setTone` / `setTipVolume` / `multiConnect` / `earReaction` 全部 `ACK=1`」
+> **只证明了「用错形状会被拒」，没证明别的**。
+>
+> 但 `cmd=12` 那一组矩阵**没有这个问题**：17 字节裸帧就是体系 A 的正确形状
+> （`c.java:287-299` 把 `licenseBuff` 直接塞进 `setBuffer`，无任何前缀），
+> 而且 W1/W3 实测「17 字节裸帧 → `ACK=0` **且槽位真的被改写**」是自证成立的。
+> → **`cmd=12` 的 ACK 规则保持有效；用 `cmd=12` 做 oracle 依然不行。**
+>
+> 待耳机上线后需要补测的一条：**体系 A 的 `setTone` 用 `payload=[v]` 时 `ACK` 是多少**
+> （理论应 `0`，因为 §2.1 说 `len==1` 就是「SET 应答成功」形态）。
+> 若确实为 `0`，则「恢复出厂后写全拒」那条结论也一并作废 —— 见 §2.5 的警告。
 
 ### 2.7 `cid=1 cmd=12` 的真实帧形状（★ 曾经在这里错了 4 小时）
 
@@ -360,11 +447,11 @@ System.arraycopy(values, 0, bArr, 2, values.length);
 
 实测组合矩阵：
 
-| `142` | `143` | `144` | 实际 LDAC 工作？ |
-|---|---|---|---|
-| `00` | `01` | `02` | ✅ 工作 |
-| `00` | `00` | `01` | ❌ 不工作 |
-| `01` | `00` | `02` | ✅ 工作（2026-10-25 历史记录） |
+| `142` | `143` | `144` | 实际 LDAC 工作？ | 证据强度 |
+|---|---|---|---|---|
+| `00` | `01` | `02` | ✅ 工作 | 实测（本次+D 组） |
+| `00` | `00` | `01` | ❌ 不工作 | 实测 |
+| `01` | `00` | `02` | 未实测 | ⚠ 仅 2026-10-25 日志里的状态快照，**没有一次「用户当时确实在听 LDAC」的直接证据** |
 
 **2026-10-25 的原始日志**（`D:\DeepSeek\fiil_pc\out\unverified_cmdid_20261025_014438.txt`）
 证明历史上有过 `142=01 / 143=00 / 144=02` 的组合，且当时 UUID 与现在逐字节相同：
@@ -443,11 +530,28 @@ System.arraycopy(values, 0, bArr, 2, values.length);
 **实际**：那是 `F39AppSettingRequest`（F048/CC Pro2）的形状。F046 要 **17 字节裸 license**。
 **验证**：见 2.7 的 W1~W4 对照表。
 
+### 坑 3b · 把两套 `cid=1` API 当成一套（2026-11-17 才查清）
+
+**现象**：一直以为 `cid=1` 有 `2=setTone` / `3=setTipVolume` / `6=setMultiConnect` / `9=earReaction`
+这一组子命令，并据此设计了「ACK 语义标定」实验。
+**实际**：那四个是 **`F39AppSettingRequest`（体系 B）** 的入口，它们的 `type` 值
+`{2,3,6,9}` 只有放在 **`cmd=12`** 的 payload 首字节里才有意义。F046 用的
+`com.fengeek.main.i.d.c`（体系 A）里根本没有这四个 cmdId ——
+它的 `cid=1` 只有 `1=setChangLan` / `3=setTone` / `12=setActivationLdac` / `13=setLdacSwitch`。
+
+**后果**：`probe_ack_semantics.py:174` 发的是 `bytes([cmd, 1, v])`，即把体系 B 的三字节形状
+挂在了体系 A 的 cmdId 上。所以那 17 次「全 ACK=01」**只证明形状错了会被拒**，
+不能用来推断「恢复出厂锁了写入通道」。
+
+**教训**：APK 里同名的 `cid` 可能有多套互不兼容的封装。**先确认某机型用的是哪个类**
+（`FiilManager.a()` 的 earType 分派表），再看那个类的 `set*` 方法，别跨类拼表。
+
 ### 坑 4 · 把 `ACK` 当 oracle
 
 **现象**：试图用 `ACK` 的 0/1 来暴力搜索正确的 license 内容。
 **实际**：`ACK` 只判 `len == 17 && side ∈ {0,1}`，**内容完全不参与**。
 **后果**：18 个候选（含全 FF、全 AA、错误 side、错误长度）的 ACK 分布是 `{0: 8, 1: 10}`，与内容毫无关系。
+**范围**：这条只对 `cmd=12` 成立（见 2.6 的适用范围说明与复核警告）。
 
 ### 坑 5 · 认为 138/139 UUID 可以改写
 
@@ -478,8 +582,11 @@ System.arraycopy(values, 0, bArr, 2, values.length);
 ### 坑 9 · 恢复出厂后不做断电重启
 
 **现象**：恢复出厂后所有 SET 都 `ACK=01`，以为耳机坏了。
-**实际**：这是**临时状态**，断电重启后立即恢复。
-**模块侧**：若提供「恢复出厂」入口，必须提示用户重启耳机。
+**实际**（待验证）：当时判定为「临时状态、断电重启后恢复」。
+断电重启后 `setLDAC(1)` 确实回 `ACK=0`，这一点成立；
+但「恢复出厂导致写全拒」这个因果**已被 2026-11-17 的复核动摇**——
+那次 17 次 SET 用的是体系 B 的帧形状发给体系 A 的 cmdId，本来就该 `ACK=01`（见 §2.5 警告与坑 3b）。
+**模块侧**：若提供「恢复出厂」入口，仍建议提示用户重启耳机（理由写「状态可能未稳定」，不要写「不重启改不了设置」）。
 
 ### 坑 10 · 认为左右耳 UUID 不同
 
@@ -492,19 +599,34 @@ System.arraycopy(values, 0, bArr, 2, values.length);
 
 ### 5.1 已经彻底排除的可能（不用再试）
 
+> **判定依据**：下表的有效性取决于当时发的是哪种帧形状。
+> 2026-11-17 逐脚本核实过六个关键脚本，结论如下：
+>
+> | 脚本 | 帧形状 | 结论 |
+> |---|---|---|
+> | `sweep_single_byte.py:159-172` | 17 字节裸帧 `[side]+16B` | ✅ 有效 |
+> | `sweep_correct_shape.py:97-100` | 17 字节裸帧 | ✅ 有效 |
+> | `sweep_keyed.py:118-120` | 17 字节裸帧 | ✅ 有效 |
+> | `probe_boot_recompute.py:87` | 17 字节裸帧 | ✅ 有效 |
+> | `probe_license_delayed.py:195` | ❌ 19 字节 `[12,17,side]+16B` | 作废 |
+> | `probe_time_license.py:94` | ❌ 19 字节 `[12,17,side]+16B` | 作废 |
+>
+> 19 字节形状是 `F39AppSettingRequest`（F048/CC Pro2）的，F046 的 `c.java:287-299`
+> 直接把裸 license 塞进 `setBuffer`，没有前缀。用 19 字节发 → `ACK=1` → 固件根本没接受。
+
 | 假设 | 排除方式 | 规模 |
 |---|---|---|
 | license = 设备 UUID | 直接写，`142` 不变 | — |
 | license = UUID 单字节变体 | 17 位置 × 256 值全扫 | **4335 次** |
 | license = UUID 的哈希/编码派生 | md5/sha1/sha256/blake2b/blake2s × raw/hex × 多偏移 | 410 候选 |
-| license = 时间戳/有效期 | 4/8 字节时间戳 × 4 位置 × 大小端、日期串、FILETIME、纪元天数 | 173 候选 |
+| license = 时间戳/有效期 | ⚠ **待重测**：那 173 个候选是用 19 字节前缀帧发的（形状错，`ACK=1` 表示根本没被接受），不能算排除。正确形状下只覆盖了「4/8 字节时间戳 × 4 位置 × 大小端」中的一部分（在 410 候选里），日期串 / FILETIME / 纪元天数**尚未用正确形状试过** |
 | license = 带 App 内密钥的派生 | XOR / HMAC × 12 个 App 密钥 | 88 候选 |
 | license = 常量（全零/全 FF/ASCII 关键词等） | 256 单字节 + 18 关键词 × 4 补齐 | 410 候选 |
-| 写入通道被锁 | 帧形状修正后 `ACK=0` | — |
-| 需要先开 143 | A/B 对照：143=1 与 143=0 两组 `ACK` 都是 01 | — |
-| 需要恢复出厂重置 | 首次真实执行，142 不动 | — |
-| 写→重启→重算 | 真重启后回读，142 仍 00 | — |
-| 延迟生效 | 保持连接 53 秒反复回读 + 2 轮断链重连 | — |
+| 写入通道被锁 | 帧形状修正后 `ACK=0`（`setLDAC` 用 `cmd=13 payload=[v]`、写 license 用 17 字节裸帧） | — |
+| 需要先开 143 | ⚠ **待重测**：原 A/B 对照用的 license 帧是 19 字节前缀形状，`ACK=01` 是形状错导致的，不能说明 143 无关 | — |
+| 需要恢复出厂重置 | 首次真实执行，`142` 不动（前后快照对比，不依赖 ACK） | — |
+| 写→重启→重算 | 真重启后回读，`142` 仍 00（这一步用的是**正确**的 17 字节裸帧，可信） | — |
+| 延迟生效 | ⚠ **待重测**：原实验写的是 19 字节前缀帧（形状错，根本没写进去），「53 秒不回读」不能证明固件不异步生效。正确形状下的 410 候选全扫是「写完立刻回读」，也没等过 |
 | GAIA 通道 | ch6 上零回包 | — |
 | 中科蓝讯 bootloader 令牌 | `SYNC A5 96 87 5A` 等 6 种令牌零回包 | — |
 | 帧结构变体 | cid 0..255 / commandType 0..3 / indexTotal 8 种 / seq 4 种 | — |
@@ -536,11 +658,27 @@ System.arraycopy(values, 0, bArr, 2, values.length);
 
 ### 5.4 如果继续研究，建议的顺序
 
-1. **先查 5.2 ① 的扫描矛盾**（成本最低）：重跑一次 `cid=39` 的 140/141 查询，
-   确认它们到底回不回包、回什么。这直接决定「是否有未发现的存储位置」。
-2. **扫 `cid=39` 的 0x19..0x7F 未回包区间**，但这次要用**带 payload 的写**而不是纯查询
-   （历史上全是纯查询，从未在这个区间试过写入）。
-3. 拿到固件（5.3）。
+> **2026-11-17 补充：先做三条「重测」，它们的成本最低、且直接决定 5.1 里哪几条排除是真的。**
+> 三条重测已合并成一个脚本：`D:\DeepSeek\fiil_work\src\probe_retest_correct_shape.py`
+> （`--dry-run` 可先看要发的帧；`--only 1|2|3` 可单跑某一条）。
+> 耳机上线后直接跑它：
+>
+> 1. **正确形状下补测「延迟生效」**（最可能翻案的一条）。
+>    用 17 字节裸帧写入，然后**保持连接**按 `0.5/1/2/3/5/8/13/21` 秒累积回读 `142`。
+>    原实验（`probe_license_delayed.py:195`）写的是 19 字节前缀帧，`ACK=1` 说明固件根本没接受，
+>    所以「53 秒不回读」什么也没证明。
+> 2. **正确形状下补测「143 是否是前置条件」**。
+>    原 A/B 对照的 license 帧也是 19 字节前缀形状，`ACK=01` 与 143 无关。
+>    正确做法：`143=1` 时写 17 字节裸帧（`ACK` 应为 `0`）、`143=0` 时同样写，两次都回读 `142`。
+> 3. **补测「写完立刻回读会不会漏掉异步生效」**。
+>    410 候选全扫全是「写完立刻回读」，从没等过；这一条用一个 30 秒对照组直接验证。
+>
+> 这三条做完，5.1 的表才能定稿。之后再做：
+>
+> 4. 查 5.2 ① 的扫描矛盾：重跑 `cid=39` 的 140/141 查询，确认它们到底回不回包。
+> 5. 扫 `cid=39` 的 0x19..0x7F 未回包区间，但这次要用**带 payload 的写**而不是纯查询
+>    （历史上全是纯查询，从未在这个区间试过写入）。
+> 6. 拿到固件（5.3）。
 
 ---
 
@@ -559,11 +697,13 @@ System.arraycopy(values, 0, bArr, 2, values.length);
 | `sweep_single_byte.py` | UUID 单字节全扫 4335 | ✅ 全灭 |
 | `sweep_correct_shape.py` | 正确形状下 410 候选 | ✅ 全灭 |
 | `sweep_keyed.py` | 带 App 密钥的派生 88 候选 | ✅ 全灭 |
-| `probe_time_license.py` | 时间型 license 173 候选 | ✅ 全灭 |
-| `probe_ack_semantics.py` | ACK 语义标定 + 143 A/B 对照 | ✅ |
+| `probe_time_license.py` | 时间型 license 173 候选 | ⚠ 跑过但**作废**（19 字节错形状） |
+| `probe_license_delayed.py` | 53 秒延迟回读 + 2 轮重连 | ⚠ 跑过但**作废**（19 字节错形状） |
+| `probe_ack_semantics.py` | ACK 语义标定 + 143 A/B 对照 | ⚠ 跑过但**部分作废**（`:174` 用了 3 字节错形状） |
 | `probe_rescue.py` | 恢复出厂后 5 种自救 | ✅ 全失败 |
 | `probe_reset_then_license.py` | 恢复出厂 → 重启窗口写 license | ✅ 首次执行 cid=36 |
 | `probe_last_dims.py` | 帧结构维度 + bootloader 令牌 | ✅ |
+| `probe_retest_correct_shape.py` | **用正确 17B 裸帧重测三条被污染结论**（延迟 / 143 前置 / 立刻回读） | 已写好，待耳机上线 |
 | `probe_value_space.py` | `cid=1` 值空间全扫 8192 帧 | 已写好，未完成 |
 | `usb_full_desc.py` | Hub IOCTL 读 USB 完整描述符 | ✅ 决定性 |
 | `usb_hid_report_desc.py` | 读 HID 报告描述符 | ✅ 零 Output 项 |
@@ -583,7 +723,8 @@ System.arraycopy(values, 0, bArr, 2, values.length);
 | `boot_recompute.json` | 写→重启→回读 |
 | `correct_shape_sweep.json` | 410 候选完整记录（59690B） |
 | `keyed_license.json` | 88 候选派生 |
-| `time_license.json` | 173 时间型候选 |
+| `license_delayed.json` | ⚠ **作废**（用了 19 字节前缀帧）：53 秒延迟 + 2 轮重连 |
+| `time_license.json` | ⚠ **作废**（用了 19 字节前缀帧）：173 时间型候选 |
 | `ack_oracle2.json` | 18 候选 ACK 矩阵 |
 | `single_byte_sweep.json` | 4335 单字节全扫 |
 | `last_dims.json` | 帧结构维度 + bootloader 令牌 |
