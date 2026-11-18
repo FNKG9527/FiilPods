@@ -16,7 +16,9 @@ dist/
 
 | 版本 | 产物 | 大小 | 下载 |
 |---|---|---|---|
-| **v3.4.2**（最新） | `FiilPods-v3.4.2-release.apk` | 4.45 MB | 本地构建，未上传 GitHub |
+| **v4.0.0**（最新） | `FiilPods-v4.0.0-release.apk` | 4.46 MB | [Release v4.0.0](https://github.com/FNKG9527/FiilPods/releases/tag/v4.0.0) |
+| v4.0.0 | `FiilPods-v4.0.0-debug.apk` | 34.35 MB | 同上（排查问题用，含完整日志） |
+| v3.4.2 | `FiilPods-v3.4.2-release.apk` | 4.45 MB | 本地构建，未上传 GitHub |
 | v3.4.1 | `FiilPods-v3.4.1-release.apk` | 4.45 MB | 同上 |
 | v3.4.0 | `FiilPods-v3.4.0-release.apk` | 4.45 MB | 同上 |
 | v3.3.2 | `FiilPods-v3.3.2-release.apk` | 4.43 MB | 同上 |
@@ -45,29 +47,36 @@ dist/
 | v1.0.0 | `FiilPods-v1.0.0-debug.apk` | 46.20 MB | 同上 |
 
 所有版本共用同一张签名证书（V2 签名 SHA-256 `605996dcb03fd9b06c9b7cde6398750a2e063d822bf43be227549bc431138d34`，
-即 Android 调试证书）。2026-11-12 用 `apksigner verify --print-certs` 复验 v3.4.2，digest 仍一致。
+即 Android 调试证书）。2026-11-18 用 `apksigner verify --print-certs` 复验 v4.0.0，digest 仍一致。
 
 ⚠️ **3.1.0 是例外**：为了上架 LSPosed 官方模块仓库，它的包名从 `moe.chenxy.fiilpods` 改成了
 `io.github.fnkg9527.fiilpods`（LSPosed 要求 applicationId 反推的域名归提交者所有）。
 包名不同即不同 App，**3.1.0 不能覆盖安装 3.0.0 及更早版本**，两者可以并存。
 从 3.0.0 升级到 3.1.0 请先卸载旧版再装新版，然后重新在 LSPosed 里启用并勾选作用域。
 
-### 3.3.x / 3.4.x 的 SHA-256
-
-| 版本 | release |
-|---|---|
-| v3.4.2 | `4EED79CACDFE7F3A136AD906461C07A0C5131C8B15995E730141508F1C1C03A3` |
-| v3.4.1 | `68A872703FC3C2B6E01BB546B7435735B2F33E0215A792426FE71FA54017030A` |
-| v3.4.0 | `50D0FA0F78525FE9791839A069C648F94EFF88120FE94827C566F432C342F08B` |
-| v3.3.2 | `10DC02B118E5190AFE51077B21BA6275F2F73C7E7378F43B5DC3EDD0141A5AB7` |
-| v3.3.1 | `44C9D8C83B0DAC52F7A8D210A3C4FBFF6FF73DA606F4ABCF4B5B4C27EE8B98CC` |
-| v3.3.0 | `29C9A7C2766DF6E50591154BC93C60E32B201BBB179CBD758B07D07B0895EBFA` |
-
-### 2.2.x / 3.0.x 的 SHA-256
+### 4.0.0 的 SHA-256
 
 | 版本 | release | debug |
 |---|---|---|
+| v4.0.0 | `D5C9D5802DAF55CD9DD673483DBC8D8D4207D394D6FDDC4BE403E8514F5FE00E` | `D458B11D8C2CC8126B5D1C70F0C74540080266EC42C43CC3E925B21DAED1E4B1` |
+
+### 3.3.x / 3.4.x 的 SHA-256
+
+| 版本 | release | debug |
+|---|---|---|
+| v3.4.2 | `4EED79CACDFE7F3A136AD906461C07A0C5131C8B15995E730141508F1C1C03A3` | 未保留 |
+| v3.4.1 | `68A872703FC3C2B6E01BB546B7435735B2F33E0215A792426FE71FA54017030A` | 未保留 |
+| v3.4.0 | `50D0FA0F78525FE9791839A069C648F94EFF88120FE94827C566F432C342F08B` | 未保留 |
+| v3.3.2 | `10DC02B118E5190AFE51077B21BA6275F2F73C7E7378F43B5DC3EDD0141A5AB7` | 未保留 |
+| v3.3.1 | `44C9D8C83B0DAC52F7A8D210A3C4FBFF6FF73DA606F4ABCF4B5B4C27EE8B98CC` | 未保留 |
 | v3.3.0 | `29C9A7C2766DF6E50591154BC93C60E32B201BBB179CBD758B07D07B0895EBFA` | `8F3DA1547417E7C4650A61053743B6868D9B46146330EA6BBE1C97CB0431A0B5` |
+
+（v3.3.1 起只构建 release，debug 版没有归档。）
+
+### 2.2.x – 3.2.x 的 SHA-256
+
+| 版本 | release | debug |
+|---|---|---|
 | v3.2.0 | `DD138A80D1D6FA12612F303E5E69D4DEC66AE272A88389455F9AA1D7272213C3` | `8C9D177871011ACAAC52E3B00CD19DCE598660B96895CD28D7C398A0DD849B4A` |
 | v3.1.0 | `E9437CC3682F8152F080B46643174CDEF57278B211752CFABEC1ACCADD4E4FE0` | `68A296F989085AAA33F8C1A023BBB09B78EA63E98086FF4203DB19FE200EE42D` |
 | v3.0.0 | `E5B3F1ECF1E71AE1DEBE7C79D8247BB3101DDD990DE19663101C470ACF771B16` | `C6F651778A26EA0E9BED2DA78DF17DCCFD8F4E33B6BDD21ABF078647CA6ECA5C` |
@@ -97,4 +106,14 @@ v1-src 是**冻结快照**，不接受修改。如需基于 v1 修复，请新�
 ./gradlew :app:assembleDebug      # → app/build/outputs/apk/debug/app-debug.apk
 ```
 
-release 开启 R8 混淆 + 资源压缩，所以只有 ~3.9 MB；debug 不混淆，因此 34–46 MB。这是正常的。
+release 开启 R8 混淆 + 资源压缩，所以只有 ~4.5 MB；debug 不混淆，因此 34–46 MB。这是正常的。
+
+> v4.0.0 构建时 `app/build/outputs/apk/debug/app-debug.apk` 被其它进程长期占用，`packageDebug`
+> 清理输出目录失败。改用 init script 把 build 目录挪到仓库外再构建：
+>
+> ```
+> gradlew.bat :app:assembleDebug -I D:\DeepSeek\_tmp_altbuild.init.gradle
+> # → D:\DeepSeek\_altbuild_fiil_mod\app\outputs\apk\debug\app-debug.apk
+> ```
+>
+> init script 只做一件事：`p.layout.buildDirectory.set(...)`。产物拷回本目录后即可删除。

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import moe.chenxy.fiilpods.utils.miuiStrongToast.data.OppoPodsAction
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -31,6 +32,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 object FiilRfcommController {
 
     private const val TAG = "FiilPods-RFCOMM"
+
+    /**
+     * 140 / 141 是 license 槽（0x8C / 0x8D）的那个机型：FIIL Key Max（F046）。
+     *
+     * 只有 140 需要这个判据 —— 它在 F049 上同时是 `getWindAdaptive`，
+     * 同号不同义，必须按机型分流（见 `dispatchMate` 里的 140 分支）。
+     */
+    private const val LDAC_LICENSE_SLOT_EAR_TYPE = 46
 
     const val ACTION_STATE = "io.github.fnkg9527.fiilpods.action.STATE_CHANGED"
     const val ACTION_COMMAND = "io.github.fnkg9527.fiilpods.action.COMMAND"
@@ -452,10 +461,114 @@ object FiilRfcommController {
     var ldacUnlocked: Boolean = false
         private set
 
+    /**
+     * 是否真的读到过 142 的回包。
+     *
+     * 与 [ldacUnlocked] 必须分开：没有回包时 `ldacUnlocked=false` 只是「默认值」，
+     * 不是「耳机说未授权」。合并这两件事会让 UI 对一台根本没有 142 回包的机型
+     * 断言「请先去官方 App 解锁」——那是没有证据的结论。
+     */
+    @Volatile
+    var ldacUnlockKnown: Boolean = false
+        private set
+
     /** 是否收到过 LDAC 状态回包。没收到过时 UI 显示「--」而不是「关」。 */
     @Volatile
     var ldacKnown: Boolean = false
         private set
+
+    /**
+     * LDAC 相关 cid=39 查询的**原始回包**（HEX 字符串 + 收到顺序），只服务调试页。
+     *
+     * 研究档案（`docs/RESEARCH_2026-11_F046_LDAC.md` §2.5）里 140/141 两个
+     * license 槽的可用性在两次实测中结论相反（11-11 全扫无回包 / 11-12 有回包），
+     * 而 144 的语义至今未定。这些都不能靠猜，所以这里原样留档：
+     * 收到就记 payload 的 HEX，没收到就一直是 null（UI 显示「不可用」）。
+     */
+    @Volatile
+    var ldacDiagRaw: Map<String, String> = emptyMap()
+        private set
+
+    /** 记录一条诊断回包（key 用 cmdId 的两位十六进制大写，如 "8E" = 142）。 */
+    private fun recordLdacDiag(cmdId: Int, payload: ByteArray) {
+        ldacDiagRaw = ldacDiagRaw + ("%02X".format(cmdId and 0xFF) to payload.joinToString(" ") { "%02X".format(it) })
+        // 每条回包都要立刻推给调试页。
+        //
+        // 之前的写法只更新内存快照、不广播：143/142/144/254 的回包要等到**下一条**
+        // license 槽回包或用户手点「重新扫描」才会被看见。而「重新扫描」是先
+        // publishLdacDiag() 再发查询，推送发生在回包之前 —— 实际表现就是
+        // 「点了扫描，144 / 254 两行永远显示未回报」。
+        publishLdacDiag()
+    }
+
+    /**
+     * 记录 140/141 license 槽的回包（可能为空帧）。
+     *
+     * 空帧也要记 —— 「耳机明确不认这条查询」和「这条查询还没发」是两种不同的状态，
+     * 面板上必须能区分（前者显示「空回包」，后者显示「未探测」）。
+     */
+    private fun recordLdacSlotDiag(frame: FiilMate.Frame) {
+        val cmd = frame.commandId
+        if (frame.payload.isEmpty()) {
+            Log.i(TAG, "license slot($cmd) 空帧：本机不认这条查询（与 11-11 全扫结论一致）")
+            ldacDiagRaw = ldacDiagRaw + ("%02X".format(cmd and 0xFF) to "")
+            publishLdacDiag()
+            return
+        }
+        // 非空帧交给 recordLdacDiag，它自己会推一次；这里再推就会重复发。
+        recordLdacDiag(cmd, frame.payload)
+    }
+
+    /** 清空 LDAC 诊断留档（每次换设备/断链/手动重扫时调用）。 */
+    fun clearLdacDiag() {
+        ldacDiagRaw = emptyMap()
+        // 清空之后必须立刻推一次。
+        //
+        // 否则「重新扫描」只是把内存清掉，屏幕上仍是上一轮的表格：
+        // 这一轮没回包的条目（比如 140/141 在某些固件上就是空帧）会一直挂着
+        // 上一轮的旧值，看起来像是「这一次也读到了同样的值」——比不显示更糟。
+        publishLdacDiag()
+    }
+
+    /**
+     * 把 LDAC 诊断快照推给调试页。
+     *
+     * 走独立广播而不是塞进状态 JSON：这份数据只服务「RFCOMM 调试」页，
+     * 而状态 JSON 每帧电量变化都会重发，没必要带着它一起跑。
+     */
+    fun publishLdacDiag() {
+        val ctx = appContext ?: return
+        runCatching {
+            ctx.sendBroadcast(
+                Intent(OppoPodsAction.ACTION_LDAC_DIAG)
+                    .setPackage(FiilConfig.MODULE_PACKAGE)
+                    .putExtra(OppoPodsAction.EXTRA_LDAC_DIAG_ENABLED, ldacEnabled)
+                    // 诊断面板问的是「**这一轮**读到了没有」，不是「历史上有没读到过」。
+                    //
+                    // 之前这里直接透传全局的 `ldacKnown` / `ldacUnlockKnown`：点一次
+                    // 「重新扫描」→ [clearLdacDiag] 把 raw 清空 → 但这两个标记仍是上一轮
+                    // 置的 true，于是面板上 143/142 两行继续显示上一轮的旧值，看起来
+                    // 像是「这一次也读到了同样的值」。
+                    //
+                    // 判据改成「本轮 raw 里有没有这条」，与下面 144/254/140/141 四行
+                    // 用的是同一套（都从 raw 取），不会再出现两种口径。
+                    .putExtra(
+                        OppoPodsAction.EXTRA_LDAC_DIAG_SWITCH_KNOWN,
+                        ldacDiagRaw.containsKey("%02X".format(FiilMate.Query.LDAC_SWITCH and 0xFF)),
+                    )
+                    .putExtra(OppoPodsAction.EXTRA_LDAC_DIAG_UNLOCKED, ldacUnlocked)
+                    .putExtra(
+                        OppoPodsAction.EXTRA_LDAC_DIAG_UNLOCK_KNOWN,
+                        ldacDiagRaw.containsKey("%02X".format(FiilMate.Query.LDAC_UNLOCK and 0xFF)),
+                    )
+                    .putExtra(
+                        OppoPodsAction.EXTRA_LDAC_DIAG_RAW,
+                        ldacDiagRaw.entries.joinToString(";") { "${it.key}=${it.value}" },
+                    )
+                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            )
+        }.onFailure { Log.w(TAG, "publishLdacDiag failed", it) }
+    }
 
     /**
      * 是否在期待「畅连切换导致的断链」。
@@ -1249,6 +1362,15 @@ object FiilRfcommController {
         tuning = false
         isMateDialect = false
         connectedViaCustomUuid = false
+        // LDAC 三态也必须跟着链路一起归零：
+        // 这几个值是「上一副耳机的」，换机后如果留着，publishState 会把旧机型的
+        // 授权位/开关位当成新耳机的状态重播出去，UI 就会显示一个从未读到过的值。
+        // ldacKnown / ldacUnlockKnown 一起清，回到「都不知道」的初始态。
+        ldacEnabled = false
+        ldacUnlocked = false
+        ldacKnown = false
+        ldacUnlockKnown = false
+        clearLdacDiag()
         // 断线后所有未确认的操作都作废：不能再因为它们超时而弹「未生效」，
         // 用户看到的是连接已断开，不该再叠一条操作失败提示。
         pendingOps.clear()
@@ -1496,14 +1618,62 @@ object FiilRfcommController {
                     if (frame.payload.isNotEmpty()) {
                         ldacEnabled = frame.byteAt(0, 0) == 1
                         ldacKnown = true
+                        recordLdacDiag(FiilMate.Query.LDAC_SWITCH, frame.payload)
                         ackOp(KEY_LDAC)
                         publishState()
+                    } else {
+                        // plen=0：耳机不认识这条查询（研究档案 §2.2 的「空帧」）。
+                        // 不能把空帧当成「开关=关」——那会把「没实现」写成「已关闭」。
+                        Log.i(TAG, "LDAC_SWITCH(143) 空帧：本机不认这条查询，保持未知")
                     }
                 }
                 FiilMate.Query.LDAC_UNLOCK -> {
                     if (frame.payload.isNotEmpty()) {
                         ldacUnlocked = frame.byteAt(0, 0) == 1
+                        // 「读到过」必须单独记：没有回包时 ldacUnlocked=false 只是默认值，
+                        // 不能当作「耳机说未授权」（TASKS_2026-11 P0-1）。
+                        ldacUnlockKnown = true
+                        recordLdacDiag(FiilMate.Query.LDAC_UNLOCK, frame.payload)
                         publishState()
+                    } else {
+                        Log.i(TAG, "LDAC_UNLOCK(142) 空帧：保持「授权状态未知」，不下「未解锁」结论")
+                    }
+                }
+                // ---- LDAC 诊断用只读查询（144 / 254）----
+                //
+                // 这两条**只**是留档，不驱动任何 UI 开关：
+                //  · 144 codec：语义至今未定（研究档案 §2.5 只记录到 01/02 两种取值），
+                //    所以只显示原始值，绝不翻译成「LDAC 正在工作」；
+                //  · 254 能力位：F046 实测 `08 00`。
+                FiilMate.Query.CODEC -> {
+                    if (frame.payload.isNotEmpty()) {
+                        recordLdacDiag(FiilMate.Query.CODEC, frame.payload)
+                        publishState()
+                    } else {
+                        Log.i(TAG, "CODEC(144) 空帧：本机不认这条查询")
+                    }
+                }
+                FiilMate.Query.CAPABILITY -> {
+                    if (frame.payload.isNotEmpty()) {
+                        recordLdacDiag(FiilMate.Query.CAPABILITY, frame.payload)
+                        publishState()
+                    } else {
+                        Log.i(TAG, "CAPABILITY(254) 空帧：本机不认这条查询")
+                    }
+                }
+                // 141 = 0x8D 右耳 license 槽（研究档案 §2.5）：只在 F046 上是这个语义，
+                // 其它机型不会发这条查询，所以这里不存在同号冲突。
+                FiilMate.Query.LICENSE_SLOT_RIGHT -> recordLdacSlotDiag(frame)
+                // 140 是**双语义**命令号，必须先按机型分流再解释：
+                //  · F046（本档研究机型）= 0x8C 左耳 license 槽；
+                //  · F049 = getWindAdaptive（自适应抗风噪）。
+                // 同一条分支里两套语义会让 F046 的 license 回包被当成「抗风噪已开」，
+                // 反过来 F049 的抗风噪回包会被当成 license 槽 —— 两个方向都是脏数据。
+                FiilMate.Query.WIND_ADAPTIVE -> {
+                    if (earType == LDAC_LICENSE_SLOT_EAR_TYPE) {
+                        recordLdacSlotDiag(frame)
+                    } else {
+                        applyAdaptiveFlag(frame, AdaptiveKind.WIND)
                     }
                 }
                 // 佩戴检测状态：`00 27 01 00 01 09 <0/1>` —— g.java:267 getWear()
@@ -1529,7 +1699,9 @@ object FiilRfcommController {
                 FiilMate.Query.EQ_ADAPTIVE -> applyAdaptiveFlag(frame, AdaptiveKind.EQ)
                 FiilMate.Query.EAR_ADAPTIVE -> applyAdaptiveFlag(frame, AdaptiveKind.EAR)
                 FiilMate.Query.NOISE_ADAPTIVE -> applyAdaptiveFlag(frame, AdaptiveKind.NOISE)
-                FiilMate.Query.WIND_ADAPTIVE -> applyAdaptiveFlag(frame, AdaptiveKind.WIND)
+                // 注意：140 的分支必须留在上面的「LDAC 诊断区」里（F046 = license 槽，
+                // 其它机型 = 抗风噪）。这里**不能**再写一条 WIND_ADAPTIVE，
+                // 否则 when 出现重复 label，后者永远不可达（编译器只警告不报错）。
                 else -> Unit
             }
             // cid=1 是「通用设置组」，真正的动作由 commandId 区分。
@@ -1603,6 +1775,16 @@ object FiilRfcommController {
         val ok = frame.payload.isEmpty() || frame.byteAt(0, 0) == 0
         if (!ok) {
             Log.i(TAG, "cid=1 cmd=${frame.commandId} echo not ok: ${frame.payload.size}B")
+            // 被拒绝的回显必须把发送时登记的目标值丢掉。
+            // 否则它会一直躺在 pendingTargets 里，等到**下一次**同命令的回显
+            // 被当成「这次的目标」应用上去 —— 表现为开关自己跳到上一次点过的位置。
+            dropPendingTargetFor(frame.commandId)
+            // 还要把**耳机的真实状态**重新推一遍。
+            // 界面在发命令时已经乐观地改成了用户点的那一侧（见 MainUI.setLdacEnabled），
+            // 如果这里什么都不推，用户看到的就是「开关停在新位置、2.5 秒后弹一句失败」，
+            // 而开关本身还错着。force=true 是必须的：状态值并没有变化，
+            // OppoCompatBridge 的去重会把这个「同值」广播直接吞掉。
+            publishState(force = true)
             return
         }
         when (frame.commandId) {
@@ -1627,12 +1809,19 @@ object FiilRfcommController {
                 if (target != null) {
                     ldacEnabled = target
                     ldacKnown = true
-                    ackOp(KEY_LDAC)
-                    publishState()
-                    // 耳机侧开关变了之后 A2DP 会重新协商编码器，但系统回调有 1.5~3 秒延迟
-                    // （见 FiilCodec 的注释）。立刻补发一次读数，让 UI 不用等这么久。
-                    runCatching { FIILProtocol.requestLdacState() }
                 }
+                // 没有登记目标时不能凭回显猜状态（回显里只有结果位），
+                // 但**必须**把这次回显消费掉：
+                //  1) ackOp 少了它，pendingOps 里那条要等到 2.5 秒超时，
+                //     然后给用户弹一句「LDAC 开关未生效」—— 明明已经成功了；
+                //  2) publishState 少了它，界面停在乐观值上没人纠偏。
+                //     （target==null 说明这次不是本进程发起的，或者发送路径已经
+                //      清掉了登记 —— 无论哪种，都该以耳机为准。）
+                ackOp(KEY_LDAC)
+                publishState()
+                // 耳机侧开关变了之后 A2DP 会重新协商编码器，但系统回调有 1.5~3 秒延迟
+                // （见 FiilCodec 的注释）。立刻补发一次读数，让 UI 不用等这么久。
+                runCatching { FIILProtocol.requestLdacState() }
             }
             FiilMate.Param.EQ_ADAPTIVE -> applyAdaptiveEcho(AdaptiveKind.EQ)
             FiilMate.Param.EAR_ADAPTIVE -> applyAdaptiveEcho(AdaptiveKind.EAR)
@@ -1648,6 +1837,25 @@ object FiilRfcommController {
         setAdaptive(kind, target ?: !adaptiveValue(kind))
         ackOp(kind.ackKey)
         publishState()
+    }
+
+    /**
+     * 丢掉某条 cid=1 命令对应的待用目标值（SET 被耳机拒绝时调用）。
+     *
+     * key 与 [FIILProtocol] 发送时登记的保持一致，见各 `setXxx` 的 `rememberPendingTarget`。
+     */
+    private fun dropPendingTargetFor(cmdId: Int) {
+        when (cmdId) {
+            FiilMate.Param.MULTIPOINT -> pendingTargets.remove(KEY_MULTIPOINT)
+            FiilMate.Param.TUNING -> pendingTargets.remove(KEY_TUNING)
+            FiilMate.Param.EQ_ADAPTIVE -> pendingTargets.remove(KEY_EQ_ADAPTIVE)
+            FiilMate.Param.EAR_ADAPTIVE -> pendingTargets.remove(KEY_EAR_ADAPTIVE)
+            FiilMate.Param.NOISE_ADAPTIVE -> pendingTargets.remove(KEY_NOISE_ADAPTIVE)
+            FiilMate.Param.WIND_ADAPTIVE -> pendingTargets.remove(KEY_WIND_ADAPTIVE)
+            FiilMate.Param.LDAC_SWITCH -> pendingTargets.remove(KEY_LDAC)
+            FiilMate.Param.TONE -> pendingTargetsInt.remove(KEY_TONE)
+            else -> Unit
+        }
     }
 
     /**
@@ -2453,6 +2661,7 @@ object FiilRfcommController {
         ldacEnabled = ldacEnabled,
         ldacUnlocked = ldacUnlocked,
         ldacKnown = ldacKnown,
+        ldacUnlockKnown = ldacUnlockKnown,
     )
 
     /** 上一次广播出去的连接/电量/ANC，用来做变化检测，避免刷屏。 */

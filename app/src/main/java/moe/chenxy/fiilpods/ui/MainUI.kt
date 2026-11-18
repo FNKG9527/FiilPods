@@ -161,6 +161,26 @@ fun MainUI(
     val ldacKnown = remember { mutableStateOf(false) }
     /** 耳机侧 LDAC 是否已解锁授权（cid=39 cmdId=142）。未解锁时开关应引导去官方 App。 */
     val ldacUnlocked = remember { mutableStateOf(false) }
+    /**
+     * 142 授权位**到底读到过没有**。
+     *
+     * `ldacUnlocked=false` 有两种完全不同的含义，UI 必须分开说：
+     *  · unlockKnown=false → 耳机没回包 / 该机型不认这条查询 → 「状态未知」；
+     *  · unlockKnown=true  → 耳机明确回了 00 → 「需要先去官方 App 解锁」。
+     * 合成一种的话，用户会照着「去解锁」的提示做完再回来，发现提示一字不变。
+     */
+    val ldacUnlockKnown = remember { mutableStateOf(false) }
+    /**
+     * 耳机侧（`headset_ldac_*`）是否**已经**回报过状态。
+     *
+     * 两个广播来源到达顺序不定，而手机侧（[moe.chenxy.fiilpods.pods.FiilCodec]）在每次
+     * `publishState` / 下发开关之后都会发一次。没有这个标记时，手机侧那条后到的广播
+     * 会把耳机侧刚读到的值覆盖掉：`ldacKnown` 被打回 false（摘要跳「读取中」）、
+     * `ldacState` 被按 A2DP 的 0 写回（开关自己弹回去）。
+     *
+     * 换设备 / 断链时清掉，让下一台耳机重新从手机侧拿初值。
+     */
+    val ldacHeadsetSeen = remember { mutableStateOf(false) }
     val tabs = remember { MainTab.entries.toList() }
     var selectedTab by remember { mutableStateOf(MainTab.Module) }
     var hasAppliedDefaultTab by remember { mutableStateOf(false) }
@@ -404,15 +424,44 @@ fun MainUI(
                             p1.getBooleanExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_ENABLED, false)
                         val headsetUnlocked =
                             p1.getBooleanExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_UNLOCKED, false)
+                        val headsetUnlockKnown =
+                            p1.getBooleanExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_UNLOCK_KNOWN, false)
 
                         if (p1.hasExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_KNOWN)) {
                             // 耳机侧优先：它才是真开关。
+                            ldacHeadsetSeen.value = true
                             ldacKnown.value = headsetKnown
                             ldacUnlocked.value = headsetUnlocked
-                            if (headsetKnown) ldacState.value = if (headsetEnabled) 1 else 0
+                            // 「142 读到过没有」单独记：没读到（否则会被当成未授权，
+                            // 用户跑去官方 App 解锁完回来也不会变）见 PodDetailPage 的三态文案。
+                            ldacUnlockKnown.value = headsetUnlockKnown
+                            // 耳机这次**没有**回报 143 时必须把值退回「未知」。
+                            //
+                            // 少了这一行，`setLdacEnabled()` 的乐观更新就再也回不来了：
+                            // 用户点开开关 → UI 先置 1 → 蓝牙进程发现本机发不了这条命令
+                            // （非 Mate 链路 / 型号不在列表），回一句「未响应」并置
+                            // ldacKnown=false 重推一次状态 —— 而这里只看 `headsetKnown`
+                            // 为真时才改值，于是界面永远停在用户点的那一侧，
+                            // 表现就是「开关点了会亮，但耳机根本没变」。
+                            ldacState.value = if (headsetKnown) {
+                                if (headsetEnabled) 1 else 0
+                            } else {
+                                -1
+                            }
                         } else {
-                            ldacKnown.value = known
-                            if (known && supported) ldacState.value = if (enabled) 1 else 0
+                            // 手机侧只是**兜底**：耳机侧一旦回报过，就以耳机侧为准。
+                            //
+                            // 两条来源到达顺序是不定的：`FiilCodec.publishState`
+                            // 在 UI_INIT / 每次下发 LDAC 开关之后都会发一次，而那时
+                            // 耳机侧的 143 往往还没回来（或已经回来且说「开着」）。
+                            // 无条件覆盖的话会出现两次可见错误：
+                            //  · ldacKnown 被打回 false → 摘要跳回「正在读取耳机状态…」；
+                            //  · ldacState 被按 A2DP 的 0 写死 → 开关自己弹回关闭。
+                            // 用户看到的就是「刚点亮的开关又自己灭了」。
+                            if (!ldacHeadsetSeen.value) {
+                                ldacKnown.value = known
+                                if (known && supported) ldacState.value = if (enabled) 1 else 0
+                            }
                         }
                     }
 
@@ -443,6 +492,8 @@ fun MainUI(
                         ldacState.value = -1
                         ldacKnown.value = false
                         ldacUnlocked.value = false
+                        ldacUnlockKnown.value = false
+                        ldacHeadsetSeen.value = false
                         connectingDeviceAddress = null
                         mainTitle.value = deviceName ?: ""
                         earphonePrefs.value = PodImagePrefs.upsertConnected(
@@ -503,6 +554,8 @@ fun MainUI(
                         ldacState.value = -1
                         ldacKnown.value = false
                         ldacUnlocked.value = false
+                        ldacUnlockKnown.value = false
+                        ldacHeadsetSeen.value = false
                     }
 
                     FiilAction.ACTION_STATE -> {
@@ -1041,6 +1094,7 @@ fun MainUI(
                 ldacSupported = FiilModels.supportsLdac(connectedEarType.intValue),
                 ldacKnown = ldacKnown.value,
                 ldacUnlocked = ldacUnlocked.value,
+                ldacUnlockKnown = ldacUnlockKnown.value,
                 onLdacChange = { setLdacEnabled(it) },
                 spatialAudioSupported = displayCapabilities.spatialAudioSupported,
                 spatialSoundSupported = displayCapabilities.spatialSoundSwitchSupported,

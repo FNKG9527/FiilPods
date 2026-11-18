@@ -438,13 +438,17 @@ object OppoCompatBridge {
     private fun publishHeadsetLdac(ctx: Context, s: FiilStatus, force: Boolean) {
         if (s.earType <= 0) return
         if (!FiilModels.supportsLdac(s.earType)) return
-        val key = "${s.ldacKnown}/${s.ldacEnabled}/${s.ldacUnlocked}"
+        // 去重键里必须带上 unlockKnown：从「没读到」变成「读到未授权」
+        // （以及反过来）都是**新信息**，值一样但含义完全不同。
+        // 漏了它，用户第一次进页面时拿不到那次「142 其实读到了」的事实。
+        val key = "${s.ldacKnown}/${s.ldacEnabled}/${s.ldacUnlocked}/${s.ldacUnlockKnown}"
         if (!force && lastLdac == key) return
         lastLdac = key
         send(ctx, OppoPodsAction.ACTION_PODS_LDAC_CHANGED) {
             putExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_KNOWN, s.ldacKnown)
             putExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_ENABLED, s.ldacEnabled)
             putExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_UNLOCKED, s.ldacUnlocked)
+            putExtra(OppoPodsAction.EXTRA_HEADSET_LDAC_UNLOCK_KNOWN, s.ldacUnlockKnown)
         }
     }
 

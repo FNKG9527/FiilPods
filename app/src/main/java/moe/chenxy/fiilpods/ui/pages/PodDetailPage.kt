@@ -71,6 +71,15 @@ fun PodDetailPage(
     ldacKnown: Boolean = false,
     /** 耳机侧 LDAC 是否已解锁/授权；未解锁时摘要提示需先用官方 App 解锁。 */
     ldacUnlocked: Boolean = false,
+    /**
+     * 142 授权位**到底读到过没有**。
+     *
+     * 与 [ldacUnlocked] 成对使用，分开说两件不同的事：
+     *  · false → 耳机没回包 / 该机型不认这条查询 → 摘要「状态未知」；
+     *  · true + unlocked=false → 耳机明确回了 00 → 「需先在 FIIL+ 里解锁」。
+     * 合成一句的话，用户按提示跑去官方 App 解锁完回来，提示一字不变。
+     */
+    ldacUnlockKnown: Boolean = false,
     onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
@@ -151,6 +160,7 @@ fun PodDetailPage(
                     ldacSupported = ldacSupported,
                     ldacKnown = ldacKnown,
                     ldacUnlocked = ldacUnlocked,
+                    ldacUnlockKnown = ldacUnlockKnown,
                     onLdacChange = onLdacChange,
                     onToneVolumeChange = onToneVolumeChange,
                     onLowLatencyModeChange = onLowLatencyModeChange,
@@ -205,6 +215,7 @@ fun PodDetailPage(
             ldacSupported = ldacSupported,
             ldacKnown = ldacKnown,
             ldacUnlocked = ldacUnlocked,
+            ldacUnlockKnown = ldacUnlockKnown,
             onLdacChange = onLdacChange,
             onToneVolumeChange = onToneVolumeChange,
             onLowLatencyModeChange = onLowLatencyModeChange,
@@ -245,6 +256,15 @@ private fun LazyListScope.podControlItems(
     ldacKnown: Boolean = false,
     /** 耳机侧 LDAC 是否已解锁/授权；未解锁时摘要提示需先用官方 App 解锁。 */
     ldacUnlocked: Boolean = false,
+    /**
+     * 142 授权位**到底读到过没有**。
+     *
+     * 与 [ldacUnlocked] 成对使用，分开说两件不同的事：
+     *  · false → 耳机没回包 / 该机型不认这条查询 → 摘要「状态未知」；
+     *  · true + unlocked=false → 耳机明确回了 00 → 「需先在 FIIL+ 里解锁」。
+     * 合成一句的话，用户按提示跑去官方 App 解锁完回来，提示一字不变。
+     */
+    ldacUnlockKnown: Boolean = false,
     onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
@@ -390,20 +410,32 @@ private fun LazyListScope.podControlItems(
                 // 不会在 A2DP 握手时声明 support，于是永远读不到 → 开关永远不显示
                 // → 用户永远没有入口打开它。这是个自锁，必须在**能力层**判断。
                 //
-                // 状态语义：
-                //  · ldacKnown=false（还没收到 143 回包）→ 摘要显示「读取中」，开关可点；
-                //  · ldacUnlocked=false（耳机未授权）→ 摘要提示先用官方 App 解锁；
-                //  · 否则按 ldacState 显示开/关。
+                // 状态语义（三层必须分开说，见 research §2.9）：
+                //  ① ldacKnown=false     → 143 开关这条查询都没回包 → 「正在读取」；
+                //  ② !ldacUnlockKnown    → 开关读到了，但 142 授权位没回包 →
+                //     **状态未知**，此时绝不能断言「未解锁」；
+                //  ③ ldacUnlockKnown && !ldacUnlocked → 耳机明确回了 142=00 →
+                //     才可以说「去官方 App 解锁」。
+                //
+                // 旧代码把 ①②③ 压缩成「!ldacUnlocked → 去解锁」一条，于是
+                // 「耳机根本没回包」也会被说成「你没解锁」：用户照做去官方 App
+                // 解锁完回来，提示一字不变 —— 这是 TASKS_2026-11 P0-1 的可见形态。
                 //
                 // ⚠️ 标题/摘要用「字面量常量」而不是 stringResource(R.string.xxx)：
                 // R8 + shrinkResources 会把只被这一处引用的资源当成无用资源删掉（实测
                 // release APK 里 ldac_codec / ldac_summary / ldac_unsupported 三个字符串
                 // 连同资源 ID 一起消失，而 dex 里字段引用还在，运行时就是 Resources$NotFound），
                 // 所以这里从源码常量取文本，彻底摆脱对资源 ID 的依赖。
+                // 显示顺序也是有讲究的：
+                //   · 开关**开着**时先报「已启用」—— 这是用户此刻唯一在乎的结论，
+                //     不能拿「授权位没读到」的枝节把它盖掉；
+                //   · 只有开关关着的时候，才轮到解释「为什么关」：
+                //     没读到授权位 → 说「未回报，开关照常可用」；读到 00 → 引导去解锁。
                 val ldacSummary = when {
-                    !ldacUnlocked -> "需先在 FIIL+ 官方 App 里解锁高清音频"
                     !ldacKnown -> "正在读取耳机状态…"
                     ldacState > 0 -> LDAC_ENABLED
+                    !ldacUnlockKnown -> "耳机未回报授权位；开关可照常使用"
+                    !ldacUnlocked -> LDAC_UNLOCK_HINT
                     else -> LDAC_SUMMARY
                 }
                 SwitchPreference(
@@ -440,3 +472,12 @@ internal const val LDAC_TITLE: String = "LDAC 编解码器"
 internal const val LDAC_SUMMARY: String = "启用高解析蓝牙音频（需耳机与手机同时支持）"
 internal const val LDAC_UNSUPPORTED: String = "当前耳机不支持 LDAC"
 internal const val LDAC_ENABLED: String = "已启用"
+
+/**
+ * 耳机明确回报「142 授权位 = 未解锁」时的引导文案。
+ *
+ * 只在**读到过** 142 的前提下才显示（见 `ldacSummary` 的三层判断）：
+ * 没读到就提示用户去解锁，等于让他为一个并不存在的问题跑一趟。
+ */
+internal const val LDAC_UNLOCK_HINT: String =
+    "此耳机的 LDAC 需要先在 FIIL+ 官方 App 内完成高清音频解锁。解锁后回到本页下拉刷新即可。"

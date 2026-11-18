@@ -7,13 +7,30 @@
 
 ---
 
-## [Unreleased]
+## [4.0.0] - 2026-11-18
+
+**这次没有加协议命令，加的是「哪些结论能下、哪些不能下」的区分。**
+
+从 3.4.2 到 4.0.0，改动集中在一条链路上：LDAC 到底该在界面上怎么讲。
+做 F046 授权位的穷尽研究时发现，模块此前把三件不同的事压成了同一个布尔值 ——
+「耳机说它没解锁」「耳机不回答这条查询」「我们还没问」在 UI 上长得一模一样，
+于是用户会被引导去 FIIL+ 官方 App 做一次并不需要的解锁操作，而设置页那个开关
+在 F046 上永远是灰的、点不动。
+
+这一版把三者拆开，并把拆开之后暴露出来的每一处断点都接上：命令被挡下要说话、
+被拒绝要回滚、清屏要推送、发广播要兜异常。协议层没动，行为层全部对齐。
+
+四个子章节按落地的先后排列，可以只看最关心的那一节。
+
+---
+
+### 研究档案：F046 LDAC 授权位
 
 **补上 F046 LDAC 授权位的完整研究档案。** 这不是功能改动，是把 2026-11-16/17 一整天的
 穷尽尝试整理成可供模块开发直接引用的文档。结论是负面的（142 在协议层无法置位），
 但过程中纠正了三处会直接影响模块正确性的错误认知。
 
-### Added
+#### Added
 
 - `docs/RESEARCH_2026-11_F046_LDAC.md`：技术档案。包含 Mate 帧完整协议字典
   （cid 全表、`cid=1` 的 SET 子命令、`cid=39` 的 30 个 QUERY 子命令及实测值）、
@@ -24,7 +41,7 @@
   P2 四项（license 槽只读展示、手机侧 codec 交叉验证、不暴露写 license、
   将来若加恢复出厂入口时的提示规范）。
 
-### Fixed
+#### Fixed
 
 - **研究档案 §2.3 的 `cid=1` 子命令表整节重写。** 上一版把两套互不兼容的 API 混成了一张表：
   `F39AppSettingRequest`（F048 / CC Pro2 用的体系 B，固定 `cmd=12`、payload `[type,1,value]`）
@@ -44,11 +61,11 @@
   `SET_RESET = 521` 是 GAIA 命令号，F046 不走 GAIA），且其证据链正好是被污染的
   「17 次 SET 全 ACK=01」。改为 P2-4 前瞻建议，理由从「写通道被锁」改成「状态可能未稳定」。
 
-### Changed
+#### Changed
 
 - `README.md`：文档索引补两条。
 
-### 研究结论摘要（影响模块的三条）
+#### 研究结论摘要（影响模块的三条）
 
 - **F046 固件不实现 GAIA 协议。** 在 ch6 上 Mate 帧正常应答、紧邻的 GAIA 帧零回包。
   `FiilGaia.kt` 的实现只服务于 F039/F048 那批老机型，对 F046 无效 —— 不必再为 F046 补 GAIA 能力。
@@ -58,7 +75,7 @@
 - **`ACK` 只判 `len == 17 && payload[0] ∈ {0,1}`，与 license 内容无关**，
   不能当写入成功的判据。唯一判据是回读 `142`。（适用范围：`cid=1 cmd=12`。）
 
-### Note
+#### Note
 
 `142` 仍未置位。累计 5000+ 次**有效**写入（含单字节 4335 全扫、常量/哈希 410、带密钥派生 88）
 全部失败，且已验证「写 → 真重启 → 回读」也不会变化。
@@ -66,6 +83,177 @@
 
 耳机上线后建议先跑 `D:\DeepSeek\fiil_work\src\probe_retest_correct_shape.py`
 （用正确帧形状重测三条被污染的结论），再决定 142 是不是真的彻底封死。
+
+---
+
+### 代码修复：三态、反馈与诊断通道
+
+**按上面那份档案把结论落回代码。** 研究结论本身没有新东西，改的是模块对这四件事的
+处理方式：142「没回包」被当成「未授权」、`setLdacSwitch` 静默失败、三层状态挤在一句
+文案里、以及 140/141/144/254 这些没定论的字段无处可查。
+
+#### Fixed
+
+- **`ldacUnlocked=false` 不再兼职表示「耳机没回报」。** 新增 `FiilStatus.ldacUnlockKnown`
+  与 `FiilRfcommController.ldacUnlockKnown`：只有**真的收到** 142 回包才置 `true`，
+  空帧（耳机不认识这条查询）只记日志、不改状态。此前两者混用，UI 会把「问不到」
+  显示成「未解锁」，把用户赶去 FIIL+ 官方 App 做一次并没有必要的解锁操作。
+- **`FIILProtocol.setLdacSwitch` 返回 `Boolean`，不再静默吞掉。** 原来两条 `return`
+  （非 Mate 方言 / 机型不在 LDAC 表）什么都不说，而 UI 是乐观更新，开关会永远停在
+  用户点下去的那一侧。现在 `BluetoothProcessHook` 收到 `false` 会弹一条 MIUI 强提示
+  （`FIILProtocol.ldacSwitchBlockReason()` 给出具体原因）并 `publishState(force = true)`
+  把开关弹回真实状态 —— 必须 `force`，否则 `OppoCompatBridge` 的同值去重会吞掉回推。
+- **SET 被耳机拒绝时丢弃乐观目标值。** `applySetParam` 的 `ACK != 0` 分支新增
+  `dropPendingTargetFor(cmdId)`，覆盖多点/云感/四个自适应/LDAC/EQ 音效。
+  此前只有「目标值」被写进 pending 却没人清，后续回读会被它覆盖，表现为
+  「改了没生效，但界面显示改了」。
+- **换机/断链清空 LDAC 全套状态。** `cleanupSocket()` 里归零 `ldacEnabled / ldacUnlocked /
+  ldacKnown / ldacUnlockKnown` 并 `clearLdacDiag()`；否则上一只耳机的授权位会被
+  `publishState` 重播到新设备上。
+- **140 双语义分流。** F046 的 140 是 license 槽、F049/F051/F053 的 140 是
+  `getWindAdaptive`。`dispatchMate` 现在按 `LDAC_LICENSE_SLOT_EAR_TYPE = 46` 分流，
+  不再把抗风噪回包写进诊断快照。
+
+#### Added
+
+- **调试页 LDAC 诊断卡**（`RfcommDebugPage`）：143 开关 / 142 授权 / 手机侧 A2DP 三层
+  分开显示，另附 144 codec、254 能力位、140/141 license 槽的**原始回包**与「重新扫描」。
+  进页面自动扫一次。三层为什么不能互相推断见 research §2.9（`142=00 / 143=01 / 144=02`
+  实测 LDAC 仍在工作）。
+- **诊断广播通道**：`ACTION_LDAC_DIAG`（蓝牙进程 → 模块，携带 5 个 extra）与
+  `ACTION_LDAC_DIAG_QUERY`（模块 → 蓝牙进程，触发重扫）。
+- **`FIILProtocol.requestLdacDiagnostics()`**：只读地扫 143/142/144/254，F046 追加
+  140/141；不驱动任何开关。
+- **`FiilModels.hasLdacLicenseSlot(earType)`**：license 槽白名单（仅 F046）。
+- **`FiilMate.Query` 补 `CAPABILITY = 254` / `LICENSE_SLOT_LEFT = 140` /
+  `LICENSE_SLOT_RIGHT = 141`**，并给 `LDAC_UNLOCK`/`LDAC_SWITCH` 标「已验证」、
+  `CODEC` 标「语义未定，不能反推 LDAC 在工作」。
+
+#### Changed
+
+- **`PodDetailPage` 的 LDAC 文案改四态顺序**：未读到任何状态 → 「正在读取耳机状态…」；
+  开关开着 → 「已启用」（先给结论，不被枝节盖掉）；开关关着且没读到 142 →
+  「耳机未回报授权位；开关可照常使用」；确认未解锁 → 引导去 FIIL+ 解锁
+  （`LDAC_UNLOCK_HINT`）。
+- `OppoCompatBridge.publishHeadsetLdac` 的去重 key 增加 `ldacUnlockKnown`，
+  广播增加 `EXTRA_HEADSET_LDAC_UNLOCK_KNOWN`；`MainUI` / `MainTabs` /
+  `EarphonesTabPage` / `PodDetailPage` 逐层透传。
+- **「手机实际编码」没有加进详情页**，只留在调试页诊断卡里。原因：`FiilCodec` 只知道
+  「LDAC 在用 / 没在用」，拿不到 AAC 与 SBC 的区分；把它塞进详情页就得把耳机侧与
+  A2DP 侧两套来源混成同一个字段，正是这次的修复要拆开的东西。
+
+#### Tests
+
+- `ModelCapabilityTest` 新增 `ldacSwitchGatedByEarType`（39/46/48/49/51/53 支持，
+  45/47 及其它不支持）与 `ldacLicenseSlotOnlyForF046`（F049 支持 LDAC 且有抗风噪，
+  但**没有** license 槽 —— 这条专门守住 140 的同号不同义）。
+
+---
+
+### 代码审查修复（第一轮）
+
+**把上面新增的链路逐环节复查了一遍，只修「加了没生效」和「加了有 bug」的两类问题，
+不加任何功能。** 上一节把状态模型和广播通道搭起来了，但有几处从「写进代码」到
+「用户真能看到」之间断了线：开关在设置页里永远灰着、点了「重新扫描」两行永远显示未回报、
+耳机拒绝命令后界面停在乐观位置、手机侧广播把耳机侧的结论打回去。以下都是这些断点。
+
+#### Fixed
+
+- **`applySetParam` 被拒绝时没有回推真实状态。** `ACK != 0` 分支原来只有
+  `dropPendingTargetFor(cmdId)` + `return`：界面在发命令时已经乐观地改成了用户点的那一侧
+  （见 `MainUI.setLdacEnabled`），耳机拒绝后什么都不推，用户看到的是「开关停在新位置、
+  2.5 秒后弹一句失败」，而开关本身还错着。现在补 `publishState(force = true)` ——
+  必须 `force`，因为状态值并没有变，`OppoCompatBridge` 的同值去重会把这个回推直接吞掉。
+  `ACTION_OP_FAILED` 只弹 Toast、不改任何状态值，所以这一步只能由蓝牙进程侧补。
+- **`recordLdacDiag` 只更新内存不推广播。** 143/142/144/254 的回包要等到**下一条** license
+  槽回包、或用户手点「重新扫描」才会被看见；而「重新扫描」是先 `publishLdacDiag()`
+  再发查询，推送发生在回包之前 —— 实际表现是「点了扫描，144 / 254 两行永远显示未回报」。
+  现在每条回包落地即推。`recordLdacSlotDiag` 的非空分支相应去掉重复推送。
+- **`clearLdacDiag()` 清完不推。** 清空只作用于内存，屏幕上仍是上一轮的表格：这一轮没回包的
+  条目（140/141 在部分固件上就是空帧）会一直挂着上一轮旧值，看起来像「这一次也读到了同样的值」
+  —— 比不显示更糟。
+- **`publishLdacDiag()` 的 known 标记用的是全局历史值。** `SWITCH_KNOWN` / `UNLOCK_KNOWN`
+  原来直接透传 `ldacKnown` / `ldacUnlockKnown`：点一次「重新扫描」→ `clearLdacDiag()`
+  清空 raw → 但这两个标记仍是上一轮置的 `true`，于是 143/142 两行继续显示上一轮的值，
+  与 144/254/140/141（都从 raw 取）两套口径。改为按「本轮 raw 里有没有这条」判断。
+- **`requestLdacDiagnostics()` 的两条门控在清屏之前 return。** 换成非 Mate 设备后点
+  「重新扫描」直接返回，一次清屏都不做，面板继续挂上一台耳机的十六进制。`clearLdacDiag()`
+  已提到两条门控之前，两条 `return` 改成带 `Log.i` 的显式分支。
+- **设置页注入卡里的 LDAC 开关永远灰着。** `SettingsControlCard` 的
+  `isEnabled = connected && ldacSupported && ldacUnlocked` 是单值判定：F046 上 142 常无回包
+  → `ldacUnlocked` 恒 `false` → 这个开关点不动，而同一台设备在模块详情页里却是可点的。
+  改为 `(!s.ldacUnlockKnown || s.ldacUnlocked)`：只有耳机**明确说**没解锁才禁用。
+- **手机侧广播把耳机侧结论打回去。** `FiilCodec.publishState` 在 `UI_INIT` 与每次下发开关后
+  都会发一次，后到的手机侧广播把耳机侧刚读到的值重置成 `ldacKnown=false`（摘要跳回
+  「正在读取耳机状态…」）、`ldacState` 按 A2DP 的 0 写回（开关自己弹回去）。
+  新增 `ldacHeadsetSeen` 标记：耳机侧广播到达后，手机侧只用于日志与调试页，不再覆盖 UI。
+- **耳机没回报 143 时 `ldacState` 不退未知。** 原来只在 `headsetKnown` 为真时赋值，
+  于是 `setLdacEnabled()` 的乐观更新永远回不来（命令被挡下 → 蓝牙进程回一条
+  `known=false` 的状态 → 这里不改值 → 界面停在用户点的那一侧）。改为 `known=false → -1`。
+- **`dispatchMate` 里有一条永远执行不到的分支。** `140`（`WIND_ADAPTIVE` /
+  `LICENSE_SLOT_LEFT`）在 `cid=39` 的 `when` 里被写了两遍：先是按 earType 分流的
+  if/else，后面又有一条裸 `WIND_ADAPTIVE -> applyAdaptiveFlag(...)`。Kotlin 的 `when`
+  遇到重复 label 时后者永远不可达，编译器只警告不报错，所以编译一直是绿的。
+  已删掉重复项，并在原位留注释说明 140 必须留在诊断区分流。
+- **`dropPendingTargetFor` 末尾多余的 `Unit` 表达式**（编译器 `Expression is unused`）。
+
+#### Note
+
+- 这次复查确认**无需改动**的链路：`ldacUnlockKnown` 从 `FiilStatus.toJson/fromJson`
+  到 `MainUI` → `MainTabs` → `EarphonesTabPage` → `PodDetailPage` 的四层透传、
+  `OppoCompatBridge` 的去重 key、`FiilCodec` 不带 `headset_*` extra（调试页据此分辨来源）、
+  调试页三 action 合一的 `IntentFilter`。设置页那张卡走 `FiilAction.ACTION_STATE` 的完整
+  JSON，不经过 `ACTION_PODS_LDAC_CHANGED`，它的授权位来自 `FiilStatus` 序列化。
+- `FiilStatus` 的四个 LDAC 字段（`ldacEnabled` / `ldacUnlocked` / `ldacUnlockKnown` /
+  `ldacKnown`）已在 `toJson` 与 `fromJson` 两侧对齐，旧版本客户端读到缺字段时按 `false` 回落。
+
+---
+
+### 代码审查修复（第二轮）
+
+**继续只修「加了没生效」和「加了有 bug」，不加任何功能。** 这一轮盯的是上一轮新建的
+那条诊断/展示链路上「出错就整页崩」和「未知被画成已知」两类问题。
+
+#### Fixed
+
+- **调试页 `registerReceiver` / `unregisterReceiver` 裸调用。** `RfcommDebugPage` 的
+  `DisposableEffect` 里注册失败会抛 `SecurityException` / `IllegalArgumentException`，
+  页面自己崩掉等于把正要看的线索一起扔掉。改为 `val registered = runCatching { ... }.isSuccess`，
+  并且只有注册成功才 `unregister`（未注册成功还去注销同样会抛 `IllegalArgumentException`）。
+- **调试页 `sendBroadcast` 裸调用。** `sendRfcommDebugBroadcast` 在蓝牙进程没起、模块被停用、
+  或广播被限流时会抛异常，整个调试页跟着崩。整个构造与发送包进 `runCatching`。
+  受影响的是「复制/清空之外的全部按钮」：进页面自动发的 `LOG_CONNECT` 与 `LDAC_DIAG_QUERY`、
+  HEX 发送、以及诊断卡上的「重新扫描」。
+- **设置页注入卡把「还没读到」画成「关」。** `SettingsControlCard` 的 LDAC 行只有
+  `isChecked = s.ldacEnabled` 一个来源，而 `false` 同时表示「耳机说它关着」和「143 还没回来、
+  值仍是默认 `false`」。改为按 `s.ldacKnown` 切换标题文案（`LDAC 高清解码` /
+  `LDAC 高清解码（读取中…）`），与模块详情页的「正在读取耳机状态…」口径一致。
+  为此 `Holder` 增加 `ldacLabel: TextView`，`buildSwitchRow` 拆出
+  `buildSwitchRowWithLabel`（返回 `Pair<LinearLayout, TextView>`）。
+
+#### Note
+
+- `FiilRfcommController.applySetParam` 的 `LDAC_SWITCH` 分支本轮确认**无需改动**：
+  `target == null` 时同样会 `ackOp(KEY_LDAC)` + `publishState()` + `requestLdacState()`，
+  迟到或重复的回显不会让 `pendingOps` 里那条悬到 2.5 秒超时误报。
+- `SET_MAF` / `SET_EQ` / `SET_LOW_LATENCY` / `SET_SPATIAL_AUDIO` / `SET_WEAR` 共用分支的
+  `!ok` 时既不 `ackOp` 也不 `publishState`：这些命令没有 cid=1 那样的回显语义，
+  按既有行为保留。
+
+---
+
+### 升级注意
+
+- **包名不变**（`io.github.fnkg9527.fiilpods`），签名不变，**可直接覆盖安装**，
+  配置全部保留。
+- 覆盖安装后**必须关开一次蓝牙**（或重启手机）——`com.android.bluetooth`、
+  `com.xiaomi.bluetooth`、`com.milink.service`、`com.android.settings` 四个进程里的
+  hook 只在进程启动时注入，不重启看到的还是旧代码。
+- 应用名从 `FiilPods 3.3` 改为 `FiilPods 4.0`（`versionCode 16 → 18`，
+  `versionName 3.4.2 → 4.0.0`）。
+- 关于 LDAC：这次的改动**不会**让一台没解锁的 F046 变成解锁。它做的是把
+  「问不到」和「未解锁」分开显示，并且在命令被挡下时给一句具体原因。
+  F046 的授权位仍未置位，见上面研究档案的 Note。
 
 ---
 

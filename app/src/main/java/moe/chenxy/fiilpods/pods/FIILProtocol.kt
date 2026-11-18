@@ -562,6 +562,57 @@ object FIILProtocol {
     }
 
     /**
+     * 本机**为什么不能**下发耳机侧 LDAC 开关；`null` 表示可以下发。
+     *
+     * 抽出来是因为「判断」和「给用户的解释」必须同源：
+     * [setLdacSwitch] 用它决定要不要发，Hook 用它决定 toast 说什么。
+     * 两处各写一份的话，改了一处忘了另一处，就会出现「命令没发出去，
+     * 提示却说耳机不支持」这种自相矛盾的话。
+     */
+    fun ldacSwitchBlockReason(): String? = when {
+        !FiilRfcommController.isMateDialect ->
+            "当前耳机走的不是 Mate 协议，无法下发 LDAC 开关"
+        !FiilModels.supportsLdac(FiilRfcommController.earType) ->
+            "此耳机型号（${FiilRfcommController.earType}）不在 LDAC 支持列表"
+        else -> null
+    }
+
+    /**
+     * 把 LDAC 相关的**只读**诊断查询全发一遍（调试页 / 诊断面板用）。
+     *
+     * 与 [requestLdacState] 的区别：那条只问「UI 需要的两件事」（143 开关 / 142 授权），
+     * 这条额外要 144 codec、254 能力位，以及 F046 专有的 140/141 license 槽，
+     * 全部只落进 [FiilRfcommController.ldacDiagRaw]，不驱动任何开关。
+     *
+     * 140/141 只在 `FiilModels.hasLdacLicenseSlot` 的机型上发：140 在 F049/F051/F053
+     * 上是自适应抗风噪查询，不能拿去当 license 槽读。
+     */
+    fun requestLdacDiagnostics() {
+        // 先把上一轮的留档清掉，再判断门控。
+        //
+        // 顺序反了会有个隐蔽后果：换了非 Mate 设备（或型号不在 LDAC 列表）之后点
+        // 「重新扫描」，两条 return 直接结束，一次清屏都不做 —— 面板上继续挂着
+        // **上一台耳机**的十六进制，而用户以为那是这台机器的读数。
+        FiilRfcommController.clearLdacDiag()
+        if (!FiilRfcommController.isMateDialect) {
+            Log.i(TAG, "requestLdacDiagnostics skipped: 非 Mate 链路")
+            return
+        }
+        if (!FiilModels.supportsLdac(FiilRfcommController.earType)) {
+            Log.i(TAG, "requestLdacDiagnostics skipped: 型号 ${FiilRfcommController.earType} 不在 LDAC 列表")
+            return
+        }
+        FiilRfcommController.sendMate(FiilMate.Cid.QUERY, FiilMate.Query.LDAC_SWITCH)
+        FiilRfcommController.sendMate(FiilMate.Cid.QUERY, FiilMate.Query.LDAC_UNLOCK)
+        FiilRfcommController.sendMate(FiilMate.Cid.QUERY, FiilMate.Query.CODEC)
+        FiilRfcommController.sendMate(FiilMate.Cid.QUERY, FiilMate.Query.CAPABILITY)
+        if (FiilModels.hasLdacLicenseSlot(FiilRfcommController.earType)) {
+            FiilRfcommController.sendMate(FiilMate.Cid.QUERY, FiilMate.Query.LICENSE_SLOT_LEFT)
+            FiilRfcommController.sendMate(FiilMate.Cid.QUERY, FiilMate.Query.LICENSE_SLOT_RIGHT)
+        }
+    }
+
+    /**
      * 开关耳机侧 LDAC。
      *
      * ⚠ 写命令与读命令的 cmdId **不对称**（这是逆向里最容易踩的坑）：
@@ -575,15 +626,16 @@ object FIILProtocol {
      *
      * 切完之后 A2DP 会重新协商编码器，`FiilCodec` 那边约 1.5~3 秒才看得到变化，
      * 所以这里只是「下发耳机侧开关」，手机侧是否真的跑在 LDAC 由 A2DP 自己决定。
+     *
+     * @return 是否真的下发了。`false` 表示这条命令在本地就被挡下（原因见
+     *   [ldacSwitchBlockReason]），此时耳机侧状态**一个字节都没变**，
+     *   调用方必须把 UI 回滚，否则开关会永远停在用户点的位置（TASKS_2026-11 P0-2）。
      */
-    fun setLdacSwitch(on: Boolean) {
-        if (!FiilRfcommController.isMateDialect) {
-            Log.i(TAG, "setLdacSwitch($on) skipped: 非 Mate 链路")
-            return
-        }
-        if (!FiilModels.supportsLdac(FiilRfcommController.earType)) {
-            Log.i(TAG, "setLdacSwitch($on) skipped: earType=${FiilRfcommController.earType} 不在 LDAC 支持列表")
-            return
+    fun setLdacSwitch(on: Boolean): Boolean {
+        val blockReason = ldacSwitchBlockReason()
+        if (blockReason != null) {
+            Log.i(TAG, "setLdacSwitch($on) skipped: $blockReason")
+            return false
         }
         // 官方顺序：开 LDAC 前先关低延迟（F046HomeFragment.java:390-405）。
         // 关 LDAC 时不需要动低延迟 —— 用户可能就在用低延迟。
@@ -601,6 +653,7 @@ object FIILProtocol {
             FiilMate.Param.LDAC_SWITCH,
             byteArrayOf(if (on) 1 else 0),
         )
+        return true
     }
 
     /**

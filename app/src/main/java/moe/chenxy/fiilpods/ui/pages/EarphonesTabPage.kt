@@ -55,6 +55,8 @@ internal fun EarphonesTabPage(
     ldacKnown: Boolean = false,
     /** 耳机侧 LDAC 是否已解锁授权。 */
     ldacUnlocked: Boolean = false,
+    /** 142 授权位读到过没有：false = 状态未知，true = 耳机明确回了 00 表示未解锁。 */
+    ldacUnlockKnown: Boolean = false,
     onLdacChange: (Boolean) -> Unit = {},
     onToneVolumeChange: (Int) -> Unit = {},
     onLowLatencyModeChange: (Int) -> Unit = {},
@@ -117,6 +119,7 @@ internal fun EarphonesTabPage(
                 ldacSupported = ldacSupported,
                 ldacKnown = ldacKnown,
                 ldacUnlocked = ldacUnlocked,
+                ldacUnlockKnown = ldacUnlockKnown,
                 onLdacChange = onLdacChange,
                 onToneVolumeChange = onToneVolumeChange,
                 onLowLatencyModeChange = onLowLatencyModeChange,

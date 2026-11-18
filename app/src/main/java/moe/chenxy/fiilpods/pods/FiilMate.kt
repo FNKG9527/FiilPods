@@ -342,11 +342,44 @@ object FiilMate {
         const val SPATIAL_AUDIO = 24     // c.java:235 getSpatialAudioStatus
         const val MULTIPOINT = 128       // c.java:27  getChangLanStatus（-128 & 0xFF）
         const val WEAR = 9               // g.java:278 / h.java getWear 的 commandId
+        /** 142（0x8E）LDAC 授权位 —— **已验证**：F046 实测回 1 字节 `00`/`01`。 */
         const val LDAC_UNLOCK = 142      // c.java:123（-114 & 0xFF）
+        /** 143（0x8F）耳机侧 LDAC 开关 —— **已验证**：F046 实测回 1 字节 `00`/`01`。 */
         const val LDAC_SWITCH = 143      // c.java:107（-113 & 0xFF）
+        /**
+         * 144（0x90）codec —— **语义未定**。
+         *
+         * F046 实测只见过 `01` / `02` 两种取值，且与 142/143 的四种组合都能出现
+         * （`docs/RESEARCH_2026-11_F046_LDAC.md` §2.5 / §2.9），因此**不能**把它当
+         * 「当前编码器」用，更不能拿它反推 LDAC 是否在工作。这里只留作诊断留档。
+         */
         const val CODEC = 144            // c.java:43  ((byte)-112)
         const val LEFT_UUID = 138        // c.java:139 ((byte)-118)
         const val TONE = 130             // c.java:251 ((byte)-126)
+
+        /**
+         * 254（0xFE）能力位 —— **已验证**：F046 实测 `08 00`（2 字节）。
+         *
+         * 语义还没拆开（哪一位对应哪项高清能力未知），所以只用于诊断面板留档。
+         */
+        const val CAPABILITY = 254
+
+        /**
+         * 140（0x8C）左耳 license 槽（只读镜像）—— **待定**。
+         *
+         * ⚠ 与下面的 [WIND_ADAPTIVE] = 140 **同号不同义**：
+         *  · F046：license 槽 L（研究档案 §2.5，可写、可持久化、精确回显）；
+         *  · F049 / F051 / F053：`getWindAdaptive` 自适应抗风噪。
+         * 模块在收发两端都按 earType 分流（见 `FiilRfcommController.dispatchMate`），
+         * 新增调用点时务必先想清楚是哪台机器。
+         *
+         * 另外这条查询的可用性两次实测相反（11-11 全扫无回包 / 11-12 有回包），
+         * 面板必须容忍空回包。
+         */
+        const val LICENSE_SLOT_LEFT = 140
+
+        /** 141（0x8D）右耳 license 槽（只读镜像）—— **待定**，同 [LICENSE_SLOT_LEFT]。 */
+        const val LICENSE_SLOT_RIGHT = 141
 
         // ---- 自适应开关查询（cid=39，命令类 f/g/h 独有）----
         //

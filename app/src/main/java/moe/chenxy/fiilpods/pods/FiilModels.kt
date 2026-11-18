@@ -248,6 +248,18 @@ object FiilModels {
     /** 该机型是否支持耳机侧的 LDAC 开关（cid=1 cmd=13 / cid=39 cmd=143）。 */
     fun supportsLdac(earType: Int): Boolean = earType in LDAC_EAR_TYPES
 
+    /**
+     * 该机型是否有 140 / 141（0x8C / 0x8D）license 槽。
+     *
+     * 目前**只有 F046（FIIL Key Max）**在 `docs/RESEARCH_2026-11_F046_LDAC.md`
+     * §2.5 里被实测过：可写、可持久化、精确回显，且写 side=0/1 都会同时改两个槽。
+     *
+     * 这里必须是白名单而不是「在 LDAC_EAR_TYPES 里就算」——
+     * 140 在 F049/F051/F053 上是 `getWindAdaptive`（自适应抗风噪），同号不同义，
+     * 拿它当 license 槽去读会把抗风噪的回包当授权信息。
+     */
+    fun hasLdacLicenseSlot(earType: Int): Boolean = earType == 46
+
     // ------------------------------------------------------------------
     // 自适应开关（与 MAF 档位并列的独立开关，不是 MAF 的第 5 档）
     // ------------------------------------------------------------------

@@ -31,6 +31,7 @@ import moe.chenxy.fiilpods.pods.FiilRfcommController
 import moe.chenxy.fiilpods.pods.RfcommLog
 import moe.chenxy.fiilpods.pods.ancCycleWire
 import moe.chenxy.fiilpods.pods.ancDialectForEarType
+import moe.chenxy.fiilpods.utils.miuiStrongToast.MiuiStrongToastUtil
 import moe.chenxy.fiilpods.utils.miuiStrongToast.data.OppoPodsAction
 
 /**
@@ -791,6 +792,10 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
             // 模块自己的 App 进程没有这个权限、也拿不到 A2dpService 实例，
             // 所以 UI 只是把目标状态广播过来，真正的下发在这里。
             addAction(OppoPodsAction.ACTION_LDAC_SET)
+            // 调试页的「LDAC 诊断」面板：点一次就把 143/142/144/254（+F046 的 140/141）
+            // 全部重扫一遍。不注册这条的话面板只能显示连接时的旧快照，
+            // 用户改完耳机状态想再看一眼必须重新连接。
+            addAction(OppoPodsAction.ACTION_LDAC_DIAG_QUERY)
         }
         runCatching {
             ctx.registerReceiver(object : BroadcastReceiver() {
@@ -1038,6 +1043,25 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                                 )
                             }
                         }
+                        // 调试页「LDAC 诊断」面板的「重新扫描」：
+                        // 把 143/142/144/254（+F046 的 140/141）全发一遍，
+                        // 顺手把手机侧 A2DP 视角也刷一次，两条来源一起看才判断得清。
+                        OppoPodsAction.ACTION_LDAC_DIAG_QUERY -> {
+                            runCatching { FIILProtocol.requestLdacDiagnostics() }
+                                .onFailure {
+                                    RfcommLog.w(context ?: hostContext, TAG, "ldac diag query failed: ${it.message}")
+                                }
+                            RfcommLog.i(
+                                context ?: hostContext, TAG,
+                                "ldac diag scan: connected=${FiilRfcommController.isConnected} " +
+                                    "earType=${FiilRfcommController.earType} " +
+                                    "mate=${FiilRfcommController.isMateDialect}",
+                            )
+                            FiilRfcommController.publishLdacDiag()
+                            // 手机侧编码器状态（A2DP 视角）也同步刷一次。
+                            val dev = FiilRfcommController.connectedDevice()
+                            FiilCodec.publishState(this@BluetoothProcessHook.hostContext, dev, classLoader)
+                        }
                         // ---- LDAC 编解码器开关 ----
                         // 入参是用户想要的最终状态（true=启用 LDAC）。
                         // 下发失败时仍然要 publishState 回读一次，让 UI 把开关弹回真实状态，
@@ -1058,61 +1082,95 @@ class BluetoothProcessHook(entry: HookEntry, classLoader: ClassLoader) :
                             //
                             // 顺序很重要：先让耳机开，再改手机偏好。反过来的话手机侧改完
                             // 时耳机还不支持，`setCodecConfigPreference` 会被系统拒掉。
+                            var sent = false
                             runCatching {
                                 RfcommLog.i(context ?: hostContext, TAG, "ldac headset-side -> want=$want")
-                                FIILProtocol.setLdacSwitch(want)
+                                sent = FIILProtocol.setLdacSwitch(want)
                             }.onFailure {
                                 RfcommLog.w(
                                     context ?: hostContext, TAG,
                                     "ldac headset-side set failed: ${it.message}",
                                 )
                             }
-                            val device = FiilRfcommController.connectedDevice()
-                            if (device == null) {
-                                RfcommLog.w(
-                                    context ?: hostContext, TAG,
-                                    "ldac set ignored: no connected device",
-                                )
-                                // 关键：这里也必须回读一次状态。
+                            if (!sent) {
+                                // 命令在**本地就被挡下**（非 Mate 链路 / 机型不在 LDAC 列表 /
+                                // 下发时抛错）。此时耳机侧一个字节都没变，而 UI 那边
+                                // `setLdacEnabled` 已经乐观把开关拨到了 want ——
+                                // 不处理的话它会永久停在用户点的那一侧（P0-2）。
                                 //
-                                // UI 那边 `setLdacEnabled` 是**乐观更新**（点下去立刻把开关
-                                // 拨到目标位置），真值完全依赖蓝牙进程回推的
-                                // `ACTION_PODS_LDAC_CHANGED`。如果这条分支只打日志就返回，
-                                // 一次「离线时误点」就会让开关永久停在用户点的那一侧：
-                                // 用户以为 LDAC 开了，实际上耳机根本没在跑 LDAC，
-                                // 而且再怎么进页面都不会被纠正。
-                                // publishState(null) 会发出 known=false，UI 收到后保持
-                                // ldacState 的原值但 ldacKnown=false，摘要显示「读取中」而不是骗人。
-                                FiilCodec.publishState(this@BluetoothProcessHook.hostContext, null, null)
-                            } else {
-                                // 同 UI_INIT 分支：必须是 hook 自己的 `classLoader`。
-                                // `device.javaClass` 是 BluetoothDevice（framework 类，
-                                // 由 boot classloader 加载），它的 classLoader 是 null，
-                                // 用 null 去 forName("com.android.bluetooth.a2dp.A2dpService")
-                                // 必失败 → setLdac 直接返回 false → 开关点了没反应。
-                                val cl = classLoader
-                                val ok = FiilCodec.setLdac(device, want, cl)
-                                RfcommLog.i(
-                                    context ?: hostContext, TAG,
-                                    "ldac set -> want=$want ok=$ok",
-                                )
-                                // 反射改编码器配置会被系统拒（部分机型需要用户在开发者选项里
-                                // 打开「蓝牙音频编解码器」才允许第三方进程改）。这时候把用户
-                                // 送到系统编码器页面，总比默默失败好。
+                                // 两件事都要做：
+                                //  ① 一句可见说明，告诉用户「为什么没生效」；
+                                //  ② 把真状态强推回 UI。
                                 //
-                                // 注意：不能在这里直接 startActivity。本 hook 跑在
-                                // com.android.bluetooth（后台进程），Android 10+ 会静默丢弃
-                                // 后台进程的 Activity 启动 —— 用户点了没反应，比不跳更糟。
-                                // 改成发广播，由前台运行的模块 App 去拉起页面。
-                                if (!ok) {
-                                    val ctx = this@BluetoothProcessHook.hostContext
-                                    if (ctx != null) FiilCodec.requestOpenCodecSettings(ctx)
+                                // ② 必须走 `force = true`：这里的 enabled/known/unlocked
+                                // 三个值跟刚才那次广播**完全一样**，OppoCompatBridge 的
+                                // 去重缓存会把普通 publishState 整条吃掉，UI 一个回包都收不到，
+                                // 也就永远弹不回来。force 会先 resetCache() 再发。
+                                val why = FIILProtocol.ldacSwitchBlockReason()
+                                    ?: "LDAC 开关下发失败，已恢复原状态"
+                                RfcommLog.w(context ?: hostContext, TAG, "ldac set blocked: $why")
+                                // 用 MiuiStrongToastUtil 而不是 MiBluetoothToastHook：
+                                // 后者是 `com.xiaomi.bluetooth`（小米蓝牙 App）进程里的 hook 实例，
+                                // 这里是 `com.android.bluetooth`（系统蓝牙）进程，拿不到那个实例。
+                                // showStringToast 非 HyperOS 时退化成普通 Toast，HyperOS 走状态栏强提示。
+                                // colorType：1=绿色（成功），其它=红色（失败）。
+                                // 包 runCatching：提示是尽力而为，绝不能因为它把蓝牙进程带崩。
+                                (context ?: hostContext)?.let { toastCtx ->
+                                    runCatching {
+                                        MiuiStrongToastUtil.showStringToast(toastCtx, why, 0)
+                                    }.onFailure {
+                                        RfcommLog.w(toastCtx, TAG, "ldac block toast failed: ${it.message}")
+                                    }
                                 }
-                                FiilCodec.publishState(
-                                    this@BluetoothProcessHook.hostContext,
-                                    device,
-                                    cl,
-                                )
+                                FiilRfcommController.publishState(force = true)
+                            } else {
+                                val device = FiilRfcommController.connectedDevice()
+                                if (device == null) {
+                                    RfcommLog.w(
+                                        context ?: hostContext, TAG,
+                                        "ldac set ignored: no connected device",
+                                    )
+                                    // 关键：这里也必须回读一次状态。
+                                    //
+                                    // UI 那边 `setLdacEnabled` 是**乐观更新**（点下去立刻把开关
+                                    // 拨到目标位置），真值完全依赖蓝牙进程回推的
+                                    // `ACTION_PODS_LDAC_CHANGED`。如果这条分支只打日志就返回，
+                                    // 一次「离线时误点」就会让开关永久停在用户点的那一侧：
+                                    // 用户以为 LDAC 开了，实际上耳机根本没在跑 LDAC，
+                                    // 而且再怎么进页面都不会被纠正。
+                                    // publishState(null) 会发出 known=false，UI 收到后保持
+                                    // ldacState 的原值但 ldacKnown=false，摘要显示「读取中」而不是骗人。
+                                    FiilCodec.publishState(this@BluetoothProcessHook.hostContext, null, null)
+                                } else {
+                                    // 同 UI_INIT 分支：必须是 hook 自己的 `classLoader`。
+                                    // `device.javaClass` 是 BluetoothDevice（framework 类，
+                                    // 由 boot classloader 加载），它的 classLoader 是 null，
+                                    // 用 null 去 forName("com.android.bluetooth.a2dp.A2dpService")
+                                    // 必失败 → setLdac 直接返回 false → 开关点了没反应。
+                                    val cl = classLoader
+                                    val ok = FiilCodec.setLdac(device, want, cl)
+                                    RfcommLog.i(
+                                        context ?: hostContext, TAG,
+                                        "ldac set -> want=$want ok=$ok",
+                                    )
+                                    // 反射改编码器配置会被系统拒（部分机型需要用户在开发者选项里
+                                    // 打开「蓝牙音频编解码器」才允许第三方进程改）。这时候把用户
+                                    // 送到系统编码器页面，总比默默失败好。
+                                    //
+                                    // 注意：不能在这里直接 startActivity。本 hook 跑在
+                                    // com.android.bluetooth（后台进程），Android 10+ 会静默丢弃
+                                    // 后台进程的 Activity 启动 —— 用户点了没反应，比不跳更糟。
+                                    // 改成发广播，由前台运行的模块 App 去拉起页面。
+                                    if (!ok) {
+                                        val ctx = this@BluetoothProcessHook.hostContext
+                                        if (ctx != null) FiilCodec.requestOpenCodecSettings(ctx)
+                                    }
+                                    FiilCodec.publishState(
+                                        this@BluetoothProcessHook.hostContext,
+                                        device,
+                                        cl,
+                                    )
+                                }
                             }
                         }
                     }

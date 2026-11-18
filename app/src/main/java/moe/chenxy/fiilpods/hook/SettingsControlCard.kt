@@ -63,6 +63,10 @@ internal object SettingsControlCard {
     private const val CHIP_BG_UNSELECTED = 0x14000000
     private const val CARD_BG = 0x0D000000
 
+    /** LDAC 行的两种标题：读到了 / 还没读到。 */
+    private const val LDAC_LABEL = "LDAC 高清解码"
+    private const val LDAC_LABEL_READING = "LDAC 高清解码（读取中…）"
+
     /**
      * 「正在程序化写入控件」的标志。
      *
@@ -95,6 +99,8 @@ internal object SettingsControlCard {
         val wearRow: LinearLayout,
         val wearSwitch: Switch,
         val ldacRow: LinearLayout,
+        /** LDAC 行的标题，要跟着「读到没读到」在两种文案间切换。 */
+        val ldacLabel: TextView,
         val ldacSwitch: Switch,
         val adaptiveControls: List<AdaptiveControl>,
         val flag: BindingFlag,
@@ -180,8 +186,20 @@ internal object SettingsControlCard {
 
             val ldacSupported = earType > 0 && FiilModels.supportsLdac(earType)
             holder.ldacRow.visibility = if (ldacSupported) View.VISIBLE else View.GONE
+            // 标题必须跟着「读到了没有」变：
+            // `ldacEnabled` 的 false 有两种完全不同的含义 —— 「耳机说它关着」
+            // 和「143 还没回来，值还是默认的 false」。直接画成「关」会让用户在
+            // 刚进页面那段空窗里以为开关是关的（而此时它可能正开着），
+            // 也与模块详情页那句「正在读取耳机状态…」自相矛盾。
+            holder.ldacLabel.text = if (s.ldacKnown) LDAC_LABEL else LDAC_LABEL_READING
             holder.ldacSwitch.isChecked = s.ldacEnabled
-            holder.ldacSwitch.isEnabled = s.connected && ldacSupported && s.ldacUnlocked
+            // 授权位（142）只是**门控提示**，不是可点条件：
+            //  · ldacUnlockKnown=false → 本机根本不认这条查询（F046 实测空帧），
+            //    此时 ldacUnlocked 的 false 只是默认值，不能拿它禁用开关，
+            //    否则设置页里这个开关会永远灰着、而模块详情页里却是可点的；
+            //  · ldacUnlockKnown=true 且 ldacUnlocked=false → 耳机明确说没解锁，
+            //    这时才禁用（与 FIIL+ 官方 App 的行为一致）。
+            holder.ldacSwitch.isEnabled = s.connected && ldacSupported && (!s.ldacUnlockKnown || s.ldacUnlocked)
 
             holder.adaptiveControls.forEach { control ->
                 val supported = supportsAdaptive(control.kind, earType)
@@ -255,7 +273,7 @@ internal object SettingsControlCard {
         card.addView(wearRow)
 
         val ldacSwitch = newSwitch(ctx, dispatch, flag, "ldac")
-        val ldacRow = buildSwitchRow(ctx, "LDAC 高清解码", ldacSwitch)
+        val (ldacRow, ldacLabel) = buildSwitchRowWithLabel(ctx, LDAC_LABEL, ldacSwitch)
         card.addView(ldacRow)
 
         val adaptiveControls = listOf(
@@ -300,6 +318,7 @@ internal object SettingsControlCard {
             wearRow = wearRow,
             wearSwitch = wearSwitch,
             ldacRow = ldacRow,
+            ldacLabel = ldacLabel,
             ldacSwitch = ldacSwitch,
             adaptiveControls = adaptiveControls,
             flag = flag,
@@ -373,20 +392,33 @@ internal object SettingsControlCard {
     }
 
     private fun buildSwitchRow(ctx: Context, label: String, switch: Switch): LinearLayout =
-        LinearLayout(ctx).apply {
+        buildSwitchRowWithLabel(ctx, label, switch).first
+
+    /**
+     * 同 [buildSwitchRow]，额外把标题 TextView 交出来。
+     *
+     * LDAC 行需要事后改标题（「读取中…」→ 正常文案），所以得拿到那个 TextView。
+     */
+    private fun buildSwitchRowWithLabel(
+        ctx: Context,
+        label: String,
+        switch: Switch,
+    ): Pair<LinearLayout, TextView> {
+        val labelView = TextView(ctx).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextColor(textColor(ctx))
+            text = label
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(ctx, 6), 0, dp(ctx, 6))
-            addView(
-                TextView(ctx).apply {
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                    setTextColor(textColor(ctx))
-                    text = label
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                }
-            )
+            addView(labelView)
             addView(switch)
         }
+        return row to labelView
+    }
 
     /**
      * 开关控件。

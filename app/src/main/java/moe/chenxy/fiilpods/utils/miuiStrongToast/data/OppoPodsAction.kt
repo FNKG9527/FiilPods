@@ -78,6 +78,33 @@ object OppoPodsAction {
     const val EXTRA_HEADSET_LDAC_UNLOCKED = "headset_ldac_unlocked"
     const val EXTRA_HEADSET_LDAC_KNOWN = "headset_ldac_known"
 
+    /**
+     * 「142 授权位读到了没有」。
+     *
+     * 与 [EXTRA_HEADSET_LDAC_UNLOCKED] 必须成对读：
+     * unlocked=false 且 unlockKnown=false 只表示**没读到**（耳机没回包 / 该机型不认这条查询），
+     * 不等于「耳机说未授权」。缺了这一位，UI 只能把两种情况混成一句
+     * 「需先在 FIIL+ 里解锁」，用户照做了也不会变（TASKS_2026-11 P0-1）。
+     */
+    const val EXTRA_HEADSET_LDAC_UNLOCK_KNOWN = "headset_ldac_unlock_known"
+
+    // 蓝牙进程 → 调试页：LDAC 诊断快照（只读留档，不驱动任何开关）。
+    //
+    // 为什么单独开一对 action：这些值（144 codec / 254 能力位 / 140、141 license 槽）
+    // 至今语义未定或实测结论相反（见 docs/RESEARCH_2026-11_F046_LDAC.md §2.5），
+    // 塞进主状态 JSON 会让每帧电量变化都把它们重播一遍，而真正需要看它们的
+    // 只有「RFCOMM 调试」页。
+    const val ACTION_LDAC_DIAG = "chen.action.oppopods.ldac_diag"
+    const val ACTION_LDAC_DIAG_QUERY = "chen.action.oppopods.ldac_diag_query"
+
+    const val EXTRA_LDAC_DIAG_ENABLED = "ldac_diag_enabled"
+    const val EXTRA_LDAC_DIAG_SWITCH_KNOWN = "ldac_diag_switch_known"
+    const val EXTRA_LDAC_DIAG_UNLOCKED = "ldac_diag_unlocked"
+    const val EXTRA_LDAC_DIAG_UNLOCK_KNOWN = "ldac_diag_unlock_known"
+
+    /** 原始回包：`"8E=01;8F=00;90=02"`（key 为 cmdId 的两位十六进制大写）。 */
+    const val EXTRA_LDAC_DIAG_RAW = "ldac_diag_raw"
+
     // 蓝牙进程 → 模块 App：请求把用户带到系统「蓝牙音频编解码器」页。
     //
     // 为什么必须绕这一圈：`com.android.bluetooth` 是后台进程，Android 10+

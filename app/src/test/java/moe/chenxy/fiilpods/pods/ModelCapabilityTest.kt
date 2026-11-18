@@ -246,4 +246,47 @@ class ModelCapabilityTest {
         assertFalse(FiilModels.supportsMultipoint(39))   // BLE-only
         assertFalse(FiilModels.supportsMultipoint(-1))   // 未知型号
     }
+
+    /**
+     * LDAC 开关的机型表必须与官方 App 的调用点一致。
+     *
+     * 依据 `docs/PROTOCOL_FIIL.md` 与 research §2.1：官方 App 里出现 `setLdacSwitch(`
+     * 的是 F046 / F048 / F049 / F051 / F053（earType 46/48/49/51/53）与 CC Pro2（39）；
+     * F045 / F047 一次都没有。
+     *
+     * 这张表判错的后果不对称：多列一个机型 → 用户点了开关耳机不认，UI 却乐观亮起；
+     * 少列一个 → 本来能用的 LDAC 入口被永久藏起来（v2.2.1 的「找不到 LDAC 开关」）。
+     */
+    @Test
+    fun ldacSwitchGatedByEarType() {
+        for (t in listOf(39, 46, 48, 49, 51, 53)) {
+            assertTrue("earType=$t 应支持 LDAC 开关", FiilModels.supportsLdac(t))
+        }
+        for (t in listOf(45, 47, 1, 28, 42, 44, 50, 52, 54, -1, 0)) {
+            assertFalse("earType=$t 不应支持 LDAC 开关", FiilModels.supportsLdac(t))
+        }
+    }
+
+    /**
+     * 140/141 license 槽只对 F046 开放，**不能**用「支持 LDAC」代替。
+     *
+     * 140（0x8C）是同一个 cmdId 的两种含义：
+     *   · F046：license 槽（可写、可持久化，research §2.5 实测）；
+     *   · F049/F051/F053：`getWindAdaptive` 自适应抗风噪查询。
+     * 所以「支持 LDAC 却查询 license 槽」的机型必须被挡掉，否则会把抗风噪回包当授权信息。
+     */
+    @Test
+    fun ldacLicenseSlotOnlyForF046() {
+        assertTrue(FiilModels.hasLdacLicenseSlot(46))
+
+        // F049/F051/F053 既支持 LDAC、又用 140 当抗风噪，是最危险的组合
+        assertTrue("前提：F049 支持 LDAC", FiilModels.supportsLdac(49))
+        assertTrue("前提：F049 有抗风噪查询", FiilModels.supportsWindAdaptive(49))
+        assertFalse("F049 的 140 是抗风噪，不是 license 槽", FiilModels.hasLdacLicenseSlot(49))
+
+        for (t in FiilModels.SELECTABLE_MODELS + listOf(-1, 0, 9999)) {
+            if (t == 46) continue
+            assertFalse("earType=$t 不应判为有 license 槽", FiilModels.hasLdacLicenseSlot(t))
+        }
+    }
 }

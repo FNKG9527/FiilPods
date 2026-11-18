@@ -10,7 +10,7 @@
 
 <div align="center">
 
-![Release](https://img.shields.io/badge/Release-3.2.0-4B8BF5?style=flat-square)
+![Release](https://img.shields.io/badge/Release-4.0.0-4B8BF5?style=flat-square)
 ![Downloads](https://img.shields.io/github/downloads/FNKG9527/FiilPods/total?style=flat-square&color=34C759)
 ![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Framework](https://img.shields.io/badge/Framework-LSPosed-FF6B6B?style=flat-square)
@@ -57,7 +57,7 @@
 | 📡 **[协议字节表](docs/PROTOCOL_FIIL.md)** | UUID 全表、GAIA 190 条命令、Mate cid/cmd 对照 |
 | 🧪 **[真机回归记录](docs/DEVICE_TEST.md)** | 19 项用例的实测结果 |
 | 🐞 **[缺陷根因档案](docs/IMPLEMENTATION.md#七相关文档)** | 九处连接根因、跨进程闪退、模式切换失效、v2.1 三处修复 |
-| 📝 **[更新日志](CHANGELOG.md)** | 1.0.0 → 3.2.0 的完整变更 |
+| 📝 **[更新日志](CHANGELOG.md)** | 1.0.0 → 4.0.0 的完整变更 |
 | ⚖️ **[第三方与借鉴来源](THIRD_PARTY_LICENSES.md)** | 依赖许可、移植了哪些开源项目的哪部分、协议事实来源 |
 
 ---
@@ -115,9 +115,9 @@
 
 **1. 安装 APK**
 
-下载 [Release 页面](https://github.com/FNKG9527/FiilPods/releases/latest) 的 `FiilPods-v3.2.0-release.apk`，直接安装（日常使用装 release 版即可，`debug` 版体积更大但带完整日志）。
+下载 [Release 页面](https://github.com/FNKG9527/FiilPods/releases/latest) 的 `FiilPods-v4.0.0-release.apk`，直接安装（日常使用装 release 版即可，`debug` 版体积更大但带完整日志）。
 
-> 📦 十个版本（1.0.0 / 2.0.0 / 2.1.0 / 2.2.0 / 2.2.1 / 2.2.2 / 2.2.3 / 3.0.0 / 3.1.0 / 3.2.0）签名一致。
+> 📦 全部版本（1.0.0 / 2.0.0 / 2.1.0 / 2.2.0 / 2.2.1 / 2.2.2 / 2.2.3 / 3.0.0 / 3.1.0 / 3.2.0 / 3.3.x / 3.4.x / 4.0.0）签名一致。
 > ⚠️ **3.1.0 为了方便上架 LSPosed 仓库改了包名**（`moe.chenxy.fiilpods` → `io.github.fnkg9527.fiilpods`），
 > 因此它与 3.0.0 及更早版本是不同的 App 身份，**不能覆盖安装**（可以并存）。从 3.0.0 升级请先卸载再安装。历史版本见 [Releases](https://github.com/FNKG9527/FiilPods/releases)。
 
@@ -319,7 +319,7 @@ Mate 机型建立 RFCOMM 链路后，**必须先发一条解锁帧**，否则耳
 | ✅ [验收报告](docs/ACCEPTANCE_REPORT.md) | 6 角色联合结项验收（72/100，「可内测」） |
 | 🔬 [F046 LDAC 研究档案](docs/RESEARCH_2026-11_F046_LDAC.md) | 142 授权位为什么写不进去：协议字典、帧形状纠错、10 条踩坑清单、5000+ 次失败记录 |
 | 🛠 [F046 LDAC 改动清单](docs/TASKS_2026-11_F046_LDAC.md) | 由上条研究推出的模块改动项（P0/P1/P2）：`ldacUnlocked` 解析判长度、静默 return 要反馈 UI、诊断面板等 |
-| 📝 [更新日志](CHANGELOG.md) | 1.0.0 → 3.2.0 完整变更 |
+| 📝 [更新日志](CHANGELOG.md) | 1.0.0 → 4.0.0 完整变更 |
 | 🤝 [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md) | 提 PR 与漏洞上报 |
 
 ---

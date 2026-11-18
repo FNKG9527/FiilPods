@@ -13,6 +13,23 @@
 
 ---
 
+## 落地状态（2026-11-17 已实施）
+
+| 编号 | 状态 | 落地位置 |
+| --- | --- | --- |
+| P0-1 | ✅ 已修 | 143/142 解析改成「有回包才置状态」；新增 `FiilStatus.ldacUnlockKnown` / `FiilRfcommController.ldacUnlockKnown`，空帧只打日志 |
+| P0-2 | ✅ 已修 | `FIILProtocol.setLdacSwitch` 返回 `Boolean`，新增 `ldacSwitchBlockReason()`；`BluetoothProcessHook` 弹提示 + `publishState(force = true)` 弹回开关 |
+| P1-1 | ✅ 已加 | `RfcommDebugPage` 的 `LdacDiagCard`（143/142/手机侧 + 144/254/140/141 原始回包 + 重新扫描）；发送入口 `FIILProtocol.requestLdacDiagnostics()` |
+| P1-2 | ✅ 已加 | `ModelCapabilityTest.ldacSwitchGatedByEarType` / `ldacLicenseSlotOnlyForF046`、`LdacDiagnosticsProtocolTest`（5 条） |
+| P1-3 | ✅ 已加 | `FiilMate.Query` 的 142/143 标「已验证」，144 标「语义未定」，140 标「与 `WIND_ADAPTIVE` 同号不同义」 |
+| P2-1 | ✅ 已加 | 140/141 license 槽在调试页只读展示（`FiilModels.hasLdacLicenseSlot` 门控，仅 F046） |
+| P2-2 | ⚠ 部分 | 手机侧只显示「LDAC 使用中 / 已声明未启用 / 未声明」，**分不出 AAC 与 SBC** —— `FiilCodec.query` 只返回 `supported/enabled`。为免与耳机侧混成同一个字段，这一项留在调试页，没有进详情页 |
+| P2-3 | ✅ 遵守 | 模块内没有任何写 140/141/142 的入口 |
+| P2-4 | 📄 保留 | 模块无恢复出厂入口，该条继续作为「将来若加」的规范 |
+| 附：文案 | ✅ 已改 | `PodDetailPage` 四态：读取中 → 已启用 → 授权位未回报 → 引导解锁（`LDAC_UNLOCK_HINT`） |
+
+---
+
 ## 0. 一句话
 
 **LDAC 开关（143）模块已经做对了，不用改。**

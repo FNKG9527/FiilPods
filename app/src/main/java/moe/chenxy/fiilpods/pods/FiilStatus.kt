@@ -115,8 +115,23 @@ data class FiilStatus(
      * 未解锁的耳机即使写 cmdId=13 也会回 ACK，但不会真的切到 LDAC
      * （见 `docs/PROTOCOL_PC.md` §9bis.3 的同类记载）。模块不做授权码输入，
      * 只能在未解锁时提示用户先用官方 App 解锁。
+     *
+     * ⚠ 这个值只是**门控提示**，不是「当前是否真在跑 LDAC」的判据：
+     * `docs/RESEARCH_2026-11_F046_LDAC.md` §2.9 实测出现过 142=00 / 143=01 /
+     * 144=02 而 LDAC 实际工作正常的组合。所以 UI 必须把「授权位」「耳机侧开关」
+     * 「A2DP 协商结果」分三层显示（见 [PodDetailPage]），不能看到 false 就断言
+     * 「没解锁 → 用不了」。判读前先确认 [ldacUnlockKnown]。
      */
     val ldacUnlocked: Boolean = false,
+    /**
+     * 耳机侧 142（授权位）是否**读到过**。
+     *
+     * 旧实现把「没有回包」和「回包说 0」混成同一个 `ldacUnlocked=false`，
+     * 于是无回包的机型/链路会在 UI 上被断言成「未解锁，请去官方 App」——
+     * 这是一句没有证据的结论（见 `docs/TASKS_2026-11_F046_LDAC.md` P0-1）。
+     * 现在两者分开：只有 `ldacUnlockKnown == true` 才允许把 [ldacUnlocked] 当结论用。
+     */
+    val ldacUnlockKnown: Boolean = false,
     /**
      * 耳机侧 LDAC 状态是否**已知**（是否收到过 143 回包）。
      *
@@ -186,6 +201,7 @@ data class FiilStatus(
         put("keyActions", JSONArray().also { arr -> keyActions.forEach { arr.put(it) } })
         put("ldacEnabled", ldacEnabled)
         put("ldacUnlocked", ldacUnlocked)
+        put("ldacUnlockKnown", ldacUnlockKnown)
         put("ldacKnown", ldacKnown)
     }.toString()
 
@@ -234,6 +250,7 @@ data class FiilStatus(
                     } ?: IntArray(0),
                     ldacEnabled = o.optBoolean("ldacEnabled", false),
                     ldacUnlocked = o.optBoolean("ldacUnlocked", false),
+                    ldacUnlockKnown = o.optBoolean("ldacUnlockKnown", false),
                     ldacKnown = o.optBoolean("ldacKnown", false),
                 )
             }.getOrDefault(EMPTY)
