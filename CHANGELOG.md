@@ -11,16 +11,53 @@
 
 **这次没有加协议命令，加的是「哪些结论能下、哪些不能下」的区分。**
 
-从 3.4.2 到 4.0.0，改动集中在一条链路上：LDAC 到底该在界面上怎么讲。
-做 F046 授权位的穷尽研究时发现，模块此前把三件不同的事压成了同一个布尔值 ——
-「耳机说它没解锁」「耳机不回答这条查询」「我们还没问」在 UI 上长得一模一样，
-于是用户会被引导去 FIIL+ 官方 App 做一次并不需要的解锁操作，而设置页那个开关
-在 F046 上永远是灰的、点不动。
+从 3.4.2 到 4.0.0，全部改动集中在 LDAC 这一条链路上。起因是一次针对 F046
+授权位的穷尽研究，过程中发现模块此前把三件不同的事压成了同一个布尔值 ——
+「耳机说它没解锁」「耳机不回答这条查询」「我们还没问」在 UI 上长得一模一样。
+后果很具体：用户会被引导去 FIIL+ 官方 App 做一次**并不需要**的解锁操作，
+而系统蓝牙设置页那个 LDAC 开关在 F046 上永远是灰的、点不动。
 
-这一版把三者拆开，并把拆开之后暴露出来的每一处断点都接上：命令被挡下要说话、
-被拒绝要回滚、清屏要推送、发广播要兜异常。协议层没动，行为层全部对齐。
+这一版把三者拆开，并把拆开之后暴露出来的每一处断点全部接上。协议层一条命令没动，
+行为层全部对齐。
 
-四个子章节按落地的先后排列，可以只看最关心的那一节。
+四个子章节按落地的先后排列，可以只看最关心的那一节。开头这一节是总账。
+
+---
+
+### LDAC 专项：做了什么、改了哪些功能
+
+#### 做了哪几方面的工作
+
+| 方面 | 内容 |
+|---|---|
+| **协议逆向** | 把 F046 上 LDAC 相关的六个查询全部实测定性：`143`（开关，可读可写）、`142`（授权位，只读且固件不置位）、`144`（codec 状态，语义未定）、`254`（能力位）、`140` / `141`（license 槽，仅 F046 是这个语义）。同时确认耳机不实现 GAIA，`cid=1 cmd=12` 的正确载荷是 17 字节裸 license 而非 19 字节体系 B 形状 |
+| **授权位穷尽尝试** | 对 `142` 累计 5000+ 次**有效**写入（单字节 4335 全扫、常量/哈希 410、带密钥派生 88），含「写 → 真重启 → 回读」，全部失败。结论：它与设备 UUID 无关、与 140/141 槽内容无关、与重启时序无关，由固件内嵌密钥的密码学校验或未暴露的激活流程控制 |
+| **语义拆分** | 发现 `140` 在 F046 是 license 槽、在 F049/F051/F053 是 `getWindAdaptive` —— 同号不同义。模块按 `earType` 分流，不再把抗风噪回包写进诊断快照 |
+| **状态模型** | 新增 `ldacUnlockKnown`，把「读到过没有」从「值是多少」里独立出来。UI 从「一句文案」升级为四态：读取中 / 已启用 / 未回报授权位 / 确认未解锁 |
+| **反馈与自愈** | 命令被挡下要弹具体原因、被拒绝要回滚到真实状态、清屏要推送、发广播要兜异常。这些是「代码写了但用户看不见」的那一半 |
+| **可观测性** | 调试页新增 LDAC 诊断卡，把六个查询的原始回包摊开，带「重新扫描」。结论不确定的字段（144 / 254 / 140 / 141）从此有地方查 |
+
+#### 更新与修复了哪些功能
+
+| 功能点 | 状态 | 落点 |
+|---|---|---|
+| 耳机侧 LDAC 开关读写 | 修复 | `setLdacSwitch` 改为返回 `Boolean`，被挡下时 `BluetoothProcessHook` 弹 MIUI 强提示并 `publishState(force = true)` 弹回真实状态 |
+| 授权位「未回报」与「未解锁」混淆 | 修复 | `FiilStatus.ldacUnlockKnown` + `FiilRfcommController.ldacUnlockKnown`；空帧只记日志、不改状态 |
+| 设置页注入卡的 LDAC 开关永久灰着 | 修复 | `SettingsControlCard` 门控改 `(!ldacUnlockKnown \|\| ldacUnlocked)` |
+| 设置页「未知」被画成「关」 | 修复 | 新增 `ldacLabel`，按 `ldacKnown` 切换「LDAC 高清解码」/「LDAC 高清解码（读取中…）」 |
+| 详情页 LDAC 文案层级 | 更新 | `PodDetailPage` 四态顺序：先报已启用，关着才解释为什么关 |
+| 命令被拒后界面停在乐观值 | 修复 | `applySetParam` 的 `ACK != 0` 分支补 `publishState(force = true)` |
+| 拒收回显污染下一次操作 | 修复 | 新增 `dropPendingTargetFor(cmdId)`，覆盖多点 / 云感 / 四个自适应 / LDAC / EQ 音效 |
+| 手机侧 A2DP 广播覆盖耳机侧结论 | 修复 | `MainUI` 新增 `ldacHeadsetSeen` 闸门，手机侧只用于日志与调试页 |
+| 耳机没回报 143 时开关自己弹回 | 修复 | `known=false` 时 `ldacState` 退 `-1` |
+| `140` 双语义互相污染 | 修复 | `dispatchMate` 按 `LDAC_LICENSE_SLOT_EAR_TYPE = 46` 分流，并删掉 `when` 里一条永远不可达的重复分支 |
+| 换设备后旧授权位被重播 | 修复 | `cleanupSocket()` 归零四态 + `clearLdacDiag()` |
+| 调试页诊断数据不刷新 | 修复 | `recordLdacDiag` / `clearLdacDiag` 落地即推送；`publishLdacDiag` 的 known 改按「本轮 raw 有没有这条」判 |
+| 调试页进出崩溃 | 修复 | `registerReceiver` / `unregisterReceiver` / `sendBroadcast` 三处全部兜异常 |
+| LDAC 诊断通道 | 新增 | `ACTION_LDAC_DIAG` / `ACTION_LDAC_DIAG_QUERY`、`requestLdacDiagnostics()`、`RfcommDebugPage` 诊断卡 |
+| license 槽白名单 | 新增 | `FiilModels.hasLdacLicenseSlot(earType)`，仅 F046 |
+| 协议常量 | 新增 | `FiilMate.Query` 补 `CAPABILITY = 254` / `LICENSE_SLOT_LEFT = 140` / `LICENSE_SLOT_RIGHT = 141` |
+| 能力表守卫 | 新增 | `ModelCapabilityTest` 的 `ldacSwitchGatedByEarType` 与 `ldacLicenseSlotOnlyForF046` |
 
 ---
 
