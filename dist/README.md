@@ -109,11 +109,16 @@ v1-src 是**冻结快照**，不接受修改。如需基于 v1 修复，请新�
 release 开启 R8 混淆 + 资源压缩，所以只有 ~4.5 MB；debug 不混淆，因此 34–46 MB。这是正常的。
 
 > v4.0.0 构建时 `app/build/outputs/apk/debug/app-debug.apk` 被其它进程长期占用，`packageDebug`
-> 清理输出目录失败。改用 init script 把 build 目录挪到仓库外再构建：
+> 清理输出目录失败。改用 init script 把 build 目录挪到仓库外再构建。脚本内容只有一段：
 >
-> ```
-> gradlew.bat :app:assembleDebug -I D:\DeepSeek\_tmp_altbuild.init.gradle
-> # → D:\DeepSeek\_altbuild_fiil_mod\app\outputs\apk\debug\app-debug.apk
+> ```groovy
+> // altbuild.init.gradle
+> def ALT_ROOT = new File("D:/DeepSeek/_altbuild_fiil_mod")
+> gradle.beforeProject { p ->
+>     def safeName = p.path == ':' ? 'root' : p.path.substring(1).replace(':', '_')
+>     p.layout.buildDirectory.set(new File(ALT_ROOT, safeName))
+> }
 > ```
 >
-> init script 只做一件事：`p.layout.buildDirectory.set(...)`。产物拷回本目录后即可删除。
+> 然后 `gradlew.bat :app:assembleDebug -I altbuild.init.gradle`，
+> 产物落在 `_altbuild_fiil_mod/app/outputs/apk/debug/app-debug.apk`，拷回本目录即可。
